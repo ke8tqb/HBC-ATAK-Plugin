@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.atakmap.android.hbc.plugin">
+
+    <!-- Audio I/O permissions needed for radio TX/RX -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+
+    <application
+        android:icon="@drawable/ic_launcher"
+        android:label="@string/app_name"
+        android:allowBackup="false">
+
+        <receiver android:name="com.atakmap.android.hbc.HBCReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.atakmap.android.hbc.SHOW_PLUGIN" />
+                <action android:name="com.atakmap.android.hbc.REFRESH_DEVICES" />
+            </intent-filter>
+        </receiver>
+
+    </application>
+
+    <!-- Declare which ATAK API version this plugin targets -->
+    <uses-library
+        android:name="${atakApiVersion}"
+        android:required="true" />
+
+</manifest>

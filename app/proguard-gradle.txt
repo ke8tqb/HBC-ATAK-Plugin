@@ -1,0 +1,22 @@
+-repackageclasses atakplugin.hbc
+
+# Keep ATAK plugin entry point
+-keep class * extends transapps.maps.plugin.life.DeploymentLifeCycle { *; }
+-keep class * implements gov.tak.api.plugin.IPlugin { *; }
+
+# Keep all plugin classes (ATAK discovers these by reflection)
+-keep class com.atakmap.android.hbc.** { *; }
+
+# Keep JNI native methods
+-keepclasseswithmembernames class * {
+    native <methods>;
+}
+
+# Keep XML-inflated views
+-keepclassmembers class * extends android.view.View {
+    public <init>(android.content.Context);
+    public <init>(android.content.Context, android.util.AttributeSet);
+}
+
+-dontwarn javax.xml.**
+-dontwarn org.w3c.**

@@ -1,0 +1,151 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#1C1C1E"
+    android:padding="16dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:divider="@android:drawable/divider_horizontal_dark"
+        android:showDividers="middle">
+
+        <!-- ═══ Title ═══════════════════════════════════════════════════════ -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="HBC Radio Plugin"
+            android:textColor="#FFFFFF"
+            android:textSize="20sp"
+            android:textStyle="bold"
+            android:paddingBottom="8dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Ham Binary Cursor on Target — OFDM Audio Transport"
+            android:textColor="#AAAAAA"
+            android:textSize="12sp"
+            android:paddingBottom="16dp" />
+
+        <!-- ═══ TX ════════════════════════════════════════════════════════ -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingBottom="12dp">
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Transmit (TX)"
+                android:textColor="#FFFFFF"
+                android:textSize="16sp" />
+            <Switch
+                android:id="@+id/hbc_switch_tx"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content" />
+        </LinearLayout>
+
+        <!-- ═══ RX ════════════════════════════════════════════════════════ -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingBottom="16dp">
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Receive (RX)"
+                android:textColor="#FFFFFF"
+                android:textSize="16sp" />
+            <Switch
+                android:id="@+id/hbc_switch_rx"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content" />
+        </LinearLayout>
+
+        <!-- ═══ Callsign ═════════════════════════════════════════════════ -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Ham Radio Callsign (FCC ID in OFDM header)"
+            android:textColor="#CCCCCC"
+            android:textSize="13sp"
+            android:paddingBottom="4dp" />
+        <EditText
+            android:id="@+id/hbc_edit_callsign"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="e.g. KE8TQB"
+            android:inputType="textCapCharacters|textNoSuggestions"
+            android:textColor="#FFFFFF"
+            android:textColorHint="#666666"
+            android:backgroundTint="#444444"
+            android:maxLength="10"
+            android:paddingBottom="16dp" />
+
+        <!-- ═══ Audio Output ══════════════════════════════════════════════ -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Audio Output (to radio)"
+            android:textColor="#CCCCCC"
+            android:textSize="13sp"
+            android:paddingBottom="4dp" />
+        <Spinner
+            android:id="@+id/hbc_spinner_output"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingBottom="16dp" />
+
+        <!-- ═══ Audio Input ═══════════════════════════════════════════════ -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Audio Input (from radio)"
+            android:textColor="#CCCCCC"
+            android:textSize="13sp"
+            android:paddingBottom="4dp" />
+        <Spinner
+            android:id="@+id/hbc_spinner_input"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingBottom="16dp" />
+
+        <!-- ═══ PTT Delay ═════════════════════════════════════════════════ -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="PTT Delay before TX (milliseconds)"
+            android:textColor="#CCCCCC"
+            android:textSize="13sp"
+            android:paddingBottom="4dp" />
+        <EditText
+            android:id="@+id/hbc_edit_ptt_delay"
+            android:layout_width="120dp"
+            android:layout_height="wrap_content"
+            android:hint="0"
+            android:inputType="number"
+            android:textColor="#FFFFFF"
+            android:textColorHint="#666666"
+            android:backgroundTint="#444444"
+            android:paddingBottom="16dp" />
+
+        <!-- ═══ Info ═══════════════════════════════════════════════════ -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="v1.0.0 · HBC Protocol · aicodix OFDM (short branch)"
+            android:textColor="#666666"
+            android:textSize="11sp"
+            android:gravity="center"
+            android:paddingTop="8dp" />
+
+    </LinearLayout>
+</ScrollView>

@@ -1,0 +1,24 @@
+﻿# Build outputs
+.gradle/
+build/
+app/build/
+*.apk
+*.aab
+
+# NDK / CMake cached deps (re-fetched at configure time)
+app/src/main/cpp/deps/
+.cxx/
+
+# Local config — never commit this!
+local.properties
+
+# Android Studio
+*.iml
+.idea/
+.idea/workspace.xml
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db

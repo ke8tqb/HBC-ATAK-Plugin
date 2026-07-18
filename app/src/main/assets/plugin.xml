@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<plugin version="1"
+    api="1"
+    implementation="com.atakmap.android.hbc.plugin.HBCLifecycle" />

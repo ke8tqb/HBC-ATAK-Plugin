@@ -1,0 +1,38 @@
+## ============================================================
+## local.properties.example
+## Copy this file to local.properties and fill in your paths.
+## local.properties is git-ignored and never committed.
+## ============================================================
+
+## REQUIRED — Android SDK location
+## In Android Studio: File > Project Structure > SDK Location
+sdk.dir=C\:/Users/YourName/AppData/Local/Android/Sdk
+
+## ============================================================
+## ATAK SDK — Option A (recommended for offline builds)
+## Download ATAK-CIV SDK from https://tak.gov
+## You need a free account. Download the SDK zip for version 5.4.0.
+## Unzip it somewhere on your machine. It will contain:
+##   main.jar                 (the ATAK API classes)
+##   atak-gradle-takdev.jar   (the Gradle plugin)
+##   debug.keystore           (use this for signing debug builds)
+## ============================================================
+
+## Point to the atak-gradle-takdev.jar from the unzipped SDK:
+takdev.plugin=C\:/path/to/ATAK-SDK-5.4.0/atak-gradle-takdev.jar
+
+## Signing keys for debug builds (use the debug.keystore from the SDK):
+takDebugKeyFile=C\:/path/to/ATAK-SDK-5.4.0/debug.keystore
+takDebugKeyFilePassword=android
+takDebugKeyAlias=androiddebugkey
+takDebugKeyPassword=android
+
+## ============================================================
+## ATAK SDK — Option B (TAK Maven repository credentials)
+## Only needed if you have a TAK.gov developer account with
+## Maven repository access. Leave these commented out if using
+## Option A above.
+## ============================================================
+# takrepo.url=https://tak.gov/nexus/repository/takdev/
+# takrepo.user=YOUR_USERNAME
+# takrepo.password=YOUR_PASSWORD
