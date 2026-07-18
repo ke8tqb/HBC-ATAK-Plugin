@@ -1,195 +1,265 @@
-# HBC ATAK Plugin
+﻿# HBC Audio — ATAK Plugin
 
-**Ham Binary Cursor on Target (HBC) — OFDM Audio Transport for ATAK**
+**Ham Binary Cursor on Target (HBC) over OFDM Audio**
 
-This ATAK plugin intercepts your CoT messages and sends them as audio tones
-through your ham radio. Other operators running the same plugin hear the tones,
-decode them, and see your position on their ATAK map — no internet required.
+An ATAK-CIV plugin that transmits and receives Cursor on Target (CoT) position
+reports over ham radio using OFDM audio tones — no internet, no repeater, no
+infrastructure required. Compliant with FCC Part 97 station identification.
+
+---
+
+## Download
+
+**[Download Latest APK from Releases](https://github.com/ke8tqb/HBC-ATAK-Plugin/releases/latest)**
+
+> Requires the **ATAK-CIV SDK build** (`atak.apk`) — *not* the production
+> ATAK-CIV release. See [Installation](#installation) for details.
+
+---
+
+## Features
+
+| Feature | Description |
+|---|---|
+| **TX — Auto** | Automatically transmits your position whenever ATAK generates a CoT event |
+| **TX — Manual (pane)** | "SEND MY POSITION NOW" button in the plugin panel |
+| **TX — Marker relay** | Tap any map marker, tap the green HBC TX button, sends that marker |
+| **RX** | Continuously listens for incoming HBC audio and plots decoded positions on the map |
+| **Audio device selection** | Choose input/output device (built-in, USB, Bluetooth, DigiRig, etc.) |
+| **PTT delay** | Configurable pre-transmit silence for VOX/PTT hardware |
+| **Self-echo suppression** | Your own audio echoes are discarded before they reach the map |
+| **FCC identification** | Callsign embedded in every OFDM packet header (Part 97 compliant) |
+
+---
 
 ## How It Works
 
 ```
-ATAK (CoT XML)
-    ↓  HBC Encoder       Compresses XML from ~600 bytes → ~20 bytes
-    ↓  OFDM Modem        Turns bytes into audio tones (like a modem)
-    ↓  AudioTrack        Plays tones out the headset jack
-    ↓  Ham Radio         Transmits the audio over the air
-    ↓  (other side)
-    ↓  AudioRecord       Listens to received audio from the radio
-    ↓  OFDM Modem        Decodes the audio back to bytes
-    ↓  HBC Decoder       Reconstructs CoT XML from bytes
-    ↓  ATAK map          Other operator's position appears on map
+TRANSMIT PATH
+─────────────
+ATAK CoT XML  (~600 bytes)
+    ↓  HBC Encoder        compress to 14-21 bytes (96% reduction)
+HBC binary frame
+    ↓  aicodix OFDM Modem (C++ via JNI)
+PCM audio at 8000 Hz
+    ↓  Android AudioTrack
+Radio mic input → over the air
+
+RECEIVE PATH
+────────────
+Radio speaker output
+    ↓  Android AudioRecord + amplitude squelch
+PCM audio buffer
+    ↓  aicodix OFDM Modem (C++ via JNI)
+HBC binary frame
+    ↓  HBC Decoder
+CoT XML → ATAK internal dispatcher → marker on map
 ```
 
----
+### HBC Protocol
 
-## Step-by-Step Build Instructions
+The HBC protocol compresses CoT XML to a minimal binary frame:
 
-### What You Need First
+| Message type | CoT XML | HBC binary |
+|---|---|---|
+| PLI (6-char callsign) | ~600 B | **14 bytes** |
+| Spot marker | ~800 B | **17 bytes** |
+| 911 Alert | ~700 B | **21 bytes** |
 
-You need four things before you can build this:
+The header encodes the transmitting station callsign in ITA2 (satisfying FCC
+Part 97 ID). Coordinates use 21/22-bit fixed-point at ×10,000 scale (~11 m
+precision). The UID is derived deterministically from the callsign so all
+receiving stations track the same contact without pre-coordination.
 
-1. **Android Studio** — you said you already have this. ✓
-2. **Android NDK** — the toolkit for building C++ code on Android
-3. **ATAK-CIV SDK** — the official ATAK developer toolkit
-4. **A debug keystore** — a digital "signature" file for signing the APK
+### OFDM Modem
 
----
-
-### Step 1 — Install the Android NDK
-
-1. Open Android Studio
-2. Click **Tools → SDK Manager**
-3. Click the **SDK Tools** tab at the top
-4. Check the box next to **NDK (Side by side)**
-5. Check the box next to **CMake**
-6. Click **OK** and let it download (might take a few minutes)
+Uses the **aicodix OFDM modem** (short branch) at 8000 Hz, 16-bit mono with
+Schmidl-Cox synchronization and polar codes for FEC. One audio frame carries
+up to 170 bytes. Lead-in silence (1 second) gives radio PTT hardware time to
+key before data starts.
 
 ---
 
-### Step 2 — Get the ATAK-CIV SDK
+## Requirements
 
-1. Go to **https://tak.gov** and create a free account
-2. Log in and go to **Products → ATAK-CIV**
-3. Download **ATAK-CIV SDK 5.4.0** (it's a .zip file)
-4. Unzip it somewhere on your computer, for example:
-   `C:\ATAK-SDK\`
-5. Inside you'll find these important files:
-   - `main.jar` — the ATAK API
-   - `atak-gradle-takdev.jar` — the build plugin
-   - `debug.keystore` — the signing key for test builds
+### End users
+
+- Android 9.0+ (API 28)
+- ATAK-CIV SDK build `atak.apk` version 5.7.0 — see Installation
+- Ham radio with audio interface (cable or USB adapter such as DigiRig Mobile)
+- Valid FCC ham radio callsign
+
+### Developers
+
+- Android Studio with NDK + CMake
+- ATAK-CIV SDK 5.7.0 from tak.gov
+- Internet access on first build (downloads aicodix C++ headers via CMake FetchContent)
 
 ---
 
-### Step 3 — Configure local.properties
+## Installation
 
-1. In this project folder (`7-18-26 ATAK Plugin\`), find the file called
-   `local.properties.example`
-2. **Copy** it and rename the copy to `local.properties`
-3. Open `local.properties` in Notepad and fill in your actual paths:
+### Step 1 — Get the ATAK SDK build
+
+Production ATAK-CIV rejects debug-signed plugins. You need the SDK flavor.
+
+1. Create a free account at **tak.gov**
+2. Download **ATAK-CIV SDK 5.7.0** (the SDK zip, not just the app APK)
+3. Inside the zip: find `atak.apk` — install this version
+
+**Important:** Uninstall production ATAK-CIV before installing `atak.apk`.
+They share the same package name and cannot coexist.
+
+### Step 2 — Clear ATAK data (if upgrading)
+
+If you had production ATAK installed, a passphrase prompt may appear.
+Clear the old data:
+
+```
+adb shell rm -rf /sdcard/atak
+```
+
+Or delete the `atak` folder via any file manager app on the device.
+
+### Step 3 — Install the plugin
+
+1. Install `atak.apk` on your Android device
+2. Download the plugin APK from the Releases page (link at top of this file)
+3. Sideload the plugin APK (tap it in a file manager, allow unknown sources)
+4. Open ATAK → Settings → Tool Preferences → Manage Plugins → Enable HBC Audio
+
+---
+
+## Usage
+
+### Opening the plugin
+
+Tap the radio antenna icon in the ATAK toolbar (top of screen).
+
+### Plugin panel controls
+
+| Control | Function |
+|---|---|
+| **SEND MY POSITION NOW** | Immediately transmits your GPS position |
+| **Transmit (TX) toggle** | Auto-transmit every CoT ATAK generates |
+| **Receive (RX) toggle** | Listen for incoming HBC audio continuously |
+| **Ham Radio Callsign** | Your FCC callsign — embedded in every packet |
+| **Audio Output** | Output device → connects to radio mic input |
+| **Audio Input** | Input device → connects from radio speaker output |
+| **PTT Delay (ms)** | Silence before OFDM signal (for VOX/PTT keying) |
+
+### Transmitting a map marker (quickest method)
+
+1. Tap any map marker (another station or placed point)
+2. A green **"HBC TX [callsign]"** button appears at the bottom of the screen
+3. Tap it — that position is transmitted immediately
+4. Tap the map background to dismiss the button
+
+**Two taps total** from selecting a marker to transmitting it.
+
+### DigiRig / USB audio setup
+
+1. Plug in the DigiRig to your Android device
+2. Open the plugin panel — spinners auto-refresh to show the new device
+3. Select DigiRig under **Audio Output** (TX path)
+4. Select DigiRig under **Audio Input** (RX path)
+5. Set PTT Delay to 300–500 ms if using VOX
+
+---
+
+## Self-Echo Suppression
+
+When RX is active, your own transmissions coming back through the radio are
+automatically discarded before reaching the ATAK map. The decoder checks:
+
+- **UID**: If the decoded UID is `HBC-{your callsign}`, discard
+- **Contact callsign**: If the decoded callsign matches yours (first 7 chars),
+  discard
+
+Both your plugin settings callsign and your ATAK self-marker callsign are
+checked, so suppression works even if the two differ.
+
+---
+
+## Building from Source
+
+### 1. Configure local.properties
+
+Copy `local.properties.example` → `local.properties` and fill in:
 
 ```properties
-# Path to your Android SDK (Android Studio shows this under File > Project Structure)
 sdk.dir=C\:/Users/YourName/AppData/Local/Android/Sdk
-
-# Path to the atak-gradle-takdev.jar from the SDK you unzipped
-takdev.plugin=C\:/ATAK-SDK/atak-gradle-takdev.jar
-
-# Path to the debug.keystore from the SDK
-takDebugKeyFile=C\:/ATAK-SDK/debug.keystore
-takDebugKeyFilePassword=android
-takDebugKeyAlias=androiddebugkey
-takDebugKeyPassword=android
+takdev.plugin=C\:/path/to/ATAK-SDK-5.7.0/atak-gradle-takdev.jar
 ```
 
-> **Important:** In Windows paths, use forward slashes `/` or double backslashes `\\`.
-> Do NOT use single backslashes `\` in this file.
+No keystore setup needed for debug builds — `atak-gradle-takdev` generates
+the debug keystore automatically.
 
----
+### 2. Build
 
-### Step 4 — Open the Project in Android Studio
+```powershell
+.\gradlew.bat assembleCivDebug
+```
 
-1. Open Android Studio
-2. Click **File → Open**
-3. Navigate to this folder: `\\Primary\David\CoT Project\7-18-26 ATAK Plugin\`
-4. Click **OK**
-5. Android Studio will sync Gradle. This takes a minute or two.
-6. **The first sync also downloads C++ dependencies from GitHub** (aicodix DSP and
-   FEC libraries). Make sure you have internet the first time you sync.
+Output: `app\build\outputs\apk\civ\debug\ATAK-Plugin-HBC-ATAK-Plugin-*.apk`
 
-If Android Studio shows a red error banner, click **Try Again** or check that
-your paths in `local.properties` are correct.
+> **Windows UNC path note:** Gradle cannot run from a network drive path
+> (`\\server\...`). Copy the project to a local drive before building.
 
----
+### 3. First build note
 
-### Step 5 — Build the APK
+CMake FetchContent downloads aicodix DSP and code headers on the first build:
+- `github.com/aicodix/dsp` — FFT, filters, PCM I/O
+- `github.com/aicodix/code` — polar codes, BCH, CRC
 
-1. In the menu bar: **Build → Build Bundle(s) / APK(s) → Build APK(s)**
-2. Wait for the build to finish (it may take 3–10 minutes the first time
-   because it compiles C++ code)
-3. When done, a popup says **"Build successful"** with a link that says
-   **"locate"** — click it
-4. Your APK is in:
-   `app\build\outputs\apk\civ\debug\`
-   The file is named something like:
-   `ATAK-Plugin-HBC-ATAK-Plugin-1.0.0-civDebug-5.4.0.apk`
-
----
-
-### Step 6 — Install on Your Android Device
-
-1. Connect your Android phone or tablet via USB
-2. Enable **USB Debugging** on the device:
-   - Go to **Settings → About Phone**
-   - Tap **Build Number** 7 times (enables Developer Options)
-   - Go to **Settings → Developer Options → USB Debugging → ON**
-3. In Android Studio: **Run → Run 'app'** or click the green ▶ play button
-   — OR —
-   Copy the APK to your device and open it with a file manager to sideload it
-
----
-
-### Step 7 — Install into ATAK
-
-1. Make sure **ATAK-CIV 5.4.0** is installed on the same device
-2. Install the plugin APK (you can just tap it in a file manager)
-3. Open ATAK
-4. Go to **Settings → Tool Preferences → Manage Plugins**
-5. The **HBC Radio Plugin** should appear — enable it
-6. Open it from the **Tools** menu (hamburger icon in the top right)
-
----
-
-### Using the Plugin
-
-Once loaded, tap the **Tools** menu in ATAK and find **HBC Radio Plugin**.
-
-In the plugin panel:
-- Enter your **Ham Radio Callsign** (required — embedded in every transmission
-  for FCC Part 97 ID)
-- Set **Audio Output** to whichever audio jack connects to your radio's mic input
-  (usually a wired headset or USB audio adapter)
-- Set **Audio Input** to the source connected to your radio's speaker output
-- Toggle **Transmit (TX)** ON — your ATAK position reports will now be sent as
-  audio whenever ATAK generates a CoT event
-- Toggle **Receive (RX)** ON — the plugin will listen for incoming HBC signals
-  and add received positions to your ATAK map automatically
-
-**PTT Delay:** If your radio uses VOX (voice-activated transmit), enter a delay
-(e.g., 500 ms) so the radio has time to key up before the data signal starts.
+Internet is required once. Subsequent builds use the cached `.cxx/` directory.
 
 ---
 
 ## Project Structure
 
 ```
-7-18-26 ATAK Plugin/
-├── app/
-│   ├── build.gradle                 Build configuration
-│   └── src/main/
-│       ├── cpp/
-│       │   ├── CMakeLists.txt       C++ build config (downloads aicodix deps)
-│       │   ├── hbc_jni.cpp          JNI bridge: Java ↔ OFDM modem
-│       │   ├── encode.cc            aicodix OFDM encoder (verbatim)
-│       │   ├── decode.cc            aicodix OFDM decoder (verbatim)
-│       │   └── *.hh                 aicodix modem headers
-│       └── java/com/atakmap/android/hbc/
-│           ├── hbc/
-│           │   ├── HBCEncoder.java  CoT XML → HBC bytes
-│           │   ├── HBCDecoder.java  HBC bytes → CoT XML
-│           │   └── ITA2.java        ITA2 alphabet tables
-│           └── audio/
-│               ├── OFDMModem.java          JNI wrapper
-│               ├── RadioAudioTransmitter.java  TX via AudioTrack
-│               └── HBCAudioMonitor.java    RX via AudioRecord
-├── local.properties.example         Copy → local.properties, fill in your paths
-└── README.md                        This file
+HBC-ATAK-Plugin/
+├── app/src/main/
+│   ├── cpp/
+│   │   ├── CMakeLists.txt        aicodix deps via FetchContent, builds libhbc-ofdm.so
+│   │   ├── hbc_jni.cpp           JNI bridge: Java byte[] <-> C++ PCM samples
+│   │   ├── encode.cc / decode.cc aicodix OFDM modem (verbatim, short branch)
+│   │   └── *.hh                  aicodix modem headers
+│   └── java/com/atakmap/android/hbc/
+│       ├── plugin/
+│       │   ├── HBCPlugin.java           ATAK 5.x IPlugin entry point
+│       │   └── PluginNativeLoader.java  Secure JNI loader
+│       ├── HBCMapComponent.java   Core: TX intercept, RX inject, overlay button
+│       ├── hbc/
+│       │   ├── HBCEncoder.java    CoT XML → HBC bytes
+│       │   ├── HBCDecoder.java    HBC bytes → CoT XML
+│       │   └── ITA2.java          ITA2 alphabet tables
+│       └── audio/
+│           ├── OFDMModem.java             JNI wrapper (encodeHBC / decodeFromAudio)
+│           ├── RadioAudioTransmitter.java  AudioTrack playback with device selection
+│           └── HBCAudioMonitor.java        AudioRecord thread with squelch + decode
+└── local.properties.example
 ```
 
-## License
+---
 
-- This plugin code: MIT
-- aicodix modem (encode.cc, decode.cc, headers): 0BSD
-- HBC Protocol (hbc_encoder.py, hbc_decoder.py): MIT
+## Protocol Specification
+
+Full protocol documentation is in the HBC-Protocol repository:
+**[github.com/ke8tqb/HBC-Protocol](https://github.com/ke8tqb/HBC-Protocol)**
+
+---
+
+## Licenses
+
+| Component | License |
+|---|---|
+| This plugin | MIT |
+| HBC Protocol | MIT — KE8TQB |
+| aicodix OFDM modem | 0BSD — Ahmet Inan |
+| ATAK SDK | See tak.gov terms |
+
+---
 
 73 de KE8TQB
