@@ -55,8 +55,16 @@ public class HBCAudioMonitor {
 
     // ─── Configuration ───────────────────────────────────────────────────────
 
-    public void setCoTListener(CoTListener l)             { this.listener = l; }
-    public void setPreferredInputDevice(AudioDeviceInfo d){ this.preferredInputDevice = d; }
+    public void setCoTListener(CoTListener l) { this.listener = l; }
+
+    public void setPreferredInputDevice(AudioDeviceInfo d) {
+        this.preferredInputDevice = d;
+        // If RX is already running, restart so the new device takes effect immediately
+        if (running.get()) {
+            stop();
+            start();
+        }
+    }
 
     // ─── Lifecycle ───────────────────────────────────────────────────────────
 

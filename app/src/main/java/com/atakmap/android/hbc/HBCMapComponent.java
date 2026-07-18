@@ -2,8 +2,10 @@ package com.atakmap.android.hbc;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.media.AudioDeviceCallback;
 import android.media.AudioDeviceInfo;
 import android.media.AudioManager;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.preference.PreferenceManager;
@@ -60,6 +62,21 @@ public class HBCMapComponent
     private AudioDeviceInfo[] outputDevices = new AudioDeviceInfo[0];
     private AudioDeviceInfo[] inputDevices  = new AudioDeviceInfo[0];
 
+    // Reference to the settings pane view so the AudioDeviceCallback can refresh spinners
+    private View settingsRoot = null;
+
+    // Refreshes spinners when USB audio devices are connected or disconnected
+    private final AudioDeviceCallback deviceCallback = new AudioDeviceCallback() {
+        @Override
+        public void onAudioDevicesAdded(AudioDeviceInfo[] added) {
+            mainHandler.post(() -> { if (settingsRoot != null) populateDeviceSpinners(settingsRoot); });
+        }
+        @Override
+        public void onAudioDevicesRemoved(AudioDeviceInfo[] removed) {
+            mainHandler.post(() -> { if (settingsRoot != null) populateDeviceSpinners(settingsRoot); });
+        }
+    };
+
     public HBCMapComponent(Context pluginContext) {
         this.pluginContext = pluginContext;
         // Use ATAK's MapView context for prefs so they survive plugin restarts
@@ -76,13 +93,19 @@ public class HBCMapComponent
         CommsMapComponent.getInstance().registerPreSendProcessor(this);
         if (prefs.getBoolean(PREF_RX_ENABLED, false))
             HBCAudioMonitor.getInstance().start();
+        // Listen for USB audio devices being plugged/unplugged
+        AudioManager am = (AudioManager) pluginContext.getSystemService(Context.AUDIO_SERVICE);
+        am.registerAudioDeviceCallback(deviceCallback, mainHandler);
         Log.d(TAG, "started");
     }
 
     public void stop() {
         HBCAudioMonitor.getInstance().stop();
+        AudioManager am = (AudioManager) pluginContext.getSystemService(Context.AUDIO_SERVICE);
+        am.unregisterAudioDeviceCallback(deviceCallback);
         // No unregisterPreSendProcessor in ATAK 5.7 API; use txEnabled flag to suppress TX
         prefs.edit().putBoolean(PREF_TX_ENABLED, false).apply();
+        settingsRoot = null;
         Log.d(TAG, "stopped");
     }
 
@@ -219,6 +242,8 @@ public class HBCMapComponent
     // ─── Settings pane binding ───────────────────────────────────────────────
 
     public void bindSettingsView(View root) {
+        settingsRoot = root;  // keep reference so deviceCallback can refresh spinners
+
         // Manual TX button — sends own position immediately
         android.widget.Button txNowBtn = root.findViewById(R.id.hbc_btn_tx_now);
         if (txNowBtn != null)
@@ -263,42 +288,68 @@ public class HBCMapComponent
         outputDevices = am.getDevices(AudioManager.GET_DEVICES_OUTPUTS);
         inputDevices  = am.getDevices(AudioManager.GET_DEVICES_INPUTS);
 
+        // ── Output spinner ────────────────────────────────────────────────────
         Spinner out = root.findViewById(R.id.hbc_spinner_output);
         if (out != null) {
             List<String> names = new ArrayList<>();
             names.add("System Default");
             for (AudioDeviceInfo d : outputDevices) names.add(deviceLabel(d));
-            out.setAdapter(new ArrayAdapter<>(pluginContext, android.R.layout.simple_spinner_item, names));
+
+            // Clear listener BEFORE setAdapter to suppress the automatic
+            // onItemSelected(pos=0) callback that Android fires on adapter change.
+            out.setOnItemSelectedListener(null);
+            out.setAdapter(new ArrayAdapter<>(pluginContext,
+                android.R.layout.simple_spinner_item, names));
+
             int saved = prefs.getInt(PREF_OUT_DEVICE, -1);
+            int savedPos = 0;
             for (int i = 0; i < outputDevices.length; i++)
-                if (outputDevices[i].getId() == saved) { out.setSelection(i + 1); break; }
-            out.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+                if (outputDevices[i].getId() == saved) { savedPos = i + 1; break; }
+            out.setSelection(savedPos, false); // false = no animation, no callback
+
+            // Attach listener AFTER selection is set, deferred to next frame
+            // so the initial setSelection callback does not fire it.
+            final AudioDeviceInfo[] outSnap = outputDevices;
+            out.post(() -> out.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
                 @Override public void onItemSelected(AdapterView<?> p, View v, int pos, long id) {
-                    AudioDeviceInfo d = pos == 0 ? null : outputDevices[pos - 1];
+                    if (pos < 0 || pos > outSnap.length) return;
+                    AudioDeviceInfo d = pos == 0 ? null : outSnap[pos - 1];
                     RadioAudioTransmitter.getInstance().setPreferredOutputDevice(d);
                     prefs.edit().putInt(PREF_OUT_DEVICE, d != null ? d.getId() : -1).apply();
+                    Log.d(TAG, "Output device -> " + (d != null ? deviceLabel(d) : "System Default"));
                 }
                 @Override public void onNothingSelected(AdapterView<?> p) {}
-            });
+            }));
         }
 
+        // ── Input spinner ─────────────────────────────────────────────────────
         Spinner in = root.findViewById(R.id.hbc_spinner_input);
         if (in != null) {
             List<String> names = new ArrayList<>();
             names.add("System Default");
             for (AudioDeviceInfo d : inputDevices) names.add(deviceLabel(d));
-            in.setAdapter(new ArrayAdapter<>(pluginContext, android.R.layout.simple_spinner_item, names));
+
+            in.setOnItemSelectedListener(null);
+            in.setAdapter(new ArrayAdapter<>(pluginContext,
+                android.R.layout.simple_spinner_item, names));
+
             int saved = prefs.getInt(PREF_IN_DEVICE, -1);
+            int savedPos = 0;
             for (int i = 0; i < inputDevices.length; i++)
-                if (inputDevices[i].getId() == saved) { in.setSelection(i + 1); break; }
-            in.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+                if (inputDevices[i].getId() == saved) { savedPos = i + 1; break; }
+            in.setSelection(savedPos, false);
+
+            final AudioDeviceInfo[] inSnap = inputDevices;
+            in.post(() -> in.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
                 @Override public void onItemSelected(AdapterView<?> p, View v, int pos, long id) {
-                    AudioDeviceInfo d = pos == 0 ? null : inputDevices[pos - 1];
+                    if (pos < 0 || pos > inSnap.length) return;
+                    AudioDeviceInfo d = pos == 0 ? null : inSnap[pos - 1];
                     HBCAudioMonitor.getInstance().setPreferredInputDevice(d);
                     prefs.edit().putInt(PREF_IN_DEVICE, d != null ? d.getId() : -1).apply();
+                    Log.d(TAG, "Input device -> " + (d != null ? deviceLabel(d) : "System Default"));
                 }
                 @Override public void onNothingSelected(AdapterView<?> p) {}
-            });
+            }));
         }
     }
 
