@@ -75,7 +75,7 @@ public class HBCMapComponent
     // Reference to the settings pane view so the AudioDeviceCallback can refresh spinners
     private View settingsRoot = null;
 
-    // Radial menu handler — adds HBC TX button to every selected map item
+    // Radial menu event listener — adds TX button after menu renders
     private HBCMapMenuHandler menuHandler;
 
     // Refreshes spinners when USB audio devices are connected or disconnected
@@ -109,9 +109,9 @@ public class HBCMapComponent
         // Listen for USB audio devices being plugged/unplugged
         AudioManager am = (AudioManager) pluginContext.getSystemService(Context.AUDIO_SERVICE);
         am.registerAudioDeviceCallback(deviceCallback, mainHandler);
-        // Register radial menu handler to add HBC TX button on any selected map item
+        // Register radial menu event listener — adds TX button AFTER menu renders
         menuHandler = new HBCMapMenuHandler(pluginContext, this);
-        MapMenuReceiver.getInstance().registerMapMenuHandler(menuHandler);
+        MapMenuReceiver.getInstance().addEventListener(menuHandler);
         Log.d(TAG, "started");
     }
 
@@ -120,7 +120,7 @@ public class HBCMapComponent
         AudioManager am = (AudioManager) pluginContext.getSystemService(Context.AUDIO_SERVICE);
         am.unregisterAudioDeviceCallback(deviceCallback);
         if (menuHandler != null) {
-            MapMenuReceiver.getInstance().unregisterMapMenuHandler(menuHandler);
+            MapMenuReceiver.getInstance().removeEventListener(menuHandler);
             menuHandler = null;
         }
         // No unregisterPreSendProcessor in ATAK 5.7 API; use txEnabled flag to suppress TX

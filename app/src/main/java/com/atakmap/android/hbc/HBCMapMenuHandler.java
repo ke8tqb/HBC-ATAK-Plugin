@@ -2,21 +2,23 @@ package com.atakmap.android.hbc;
 
 import android.content.Context;
 import android.graphics.Point;
+import android.os.Handler;
+import android.os.Looper;
 
 import com.atakmap.android.maps.MapDataRef;
 import com.atakmap.android.maps.MapItem;
 import com.atakmap.android.maps.MapView;
 import com.atakmap.android.maps.PointMapItem;
 import com.atakmap.android.menu.MapMenuButtonWidget;
-import com.atakmap.android.menu.MapMenuHandler;
+import com.atakmap.android.menu.MapMenuEventListener;
+import com.atakmap.android.menu.MapMenuReceiver;
 import com.atakmap.android.menu.MapMenuWidget;
+import com.atakmap.android.menu.MenuLayoutWidget;
 import com.atakmap.android.widgets.MapWidget;
 import com.atakmap.android.widgets.WidgetBackground;
 import com.atakmap.android.widgets.WidgetIcon;
 import com.atakmap.android.hbc.plugin.R;
 import com.atakmap.coremap.log.Log;
-
-import gov.tak.api.widgets.IWidgetBackground;
 
 /**
  * HBCMapMenuHandler
@@ -25,9 +27,10 @@ import gov.tak.api.widgets.IWidgetBackground;
  * selects any map item (marker). Pressing the button encodes that item's
  * position via the HBC protocol and transmits it as OFDM audio.
  *
- * Registered via MapMenuReceiver.getInstance().registerMapMenuHandler().
+ * Uses MapMenuEventListener so the button is added AFTER the menu renders,
+ * not during creation (MapMenuHandler fires too early and buttons get discarded).
  */
-public class HBCMapMenuHandler implements MapMenuHandler {
+public class HBCMapMenuHandler implements MapMenuEventListener {
 
     private static final String TAG = "HBCMapMenuHandler";
 
@@ -39,70 +42,86 @@ public class HBCMapMenuHandler implements MapMenuHandler {
         this.mapComponent  = mapComponent;
     }
 
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+
+    // ─── MapMenuEventListener ────────────────────────────────────────────────
+
+    /**
+     * Fires when a radial menu OPENS. We post our button addition to the NEXT
+     * UI frame so the menu is fully laid out before we modify it.
+     */
     @Override
-    public void updateMenu(MapItem item, MapMenuWidget menu) {
-        // Only for point markers with a geographic position
-        if (!(item instanceof PointMapItem)) return;
+    public boolean onShowMenu(final MapItem item) {
+        if (!(item instanceof PointMapItem)) return false;
 
-        // Skip own self-marker (use the pane's "Send My Position" button for that)
         MapView mv = MapView.getMapView();
-        if (mv == null) return;
+        if (mv == null) return false;
         if (mv.getSelfMarker() != null
-                && item.getUID().equals(mv.getSelfMarker().getUID())) return;
+                && item.getUID().equals(mv.getSelfMarker().getUID())) return false;
 
-        try {
-            // ATAK context required for widget display metrics and resources
-            Context ctx = mv.getContext();
+        mainHandler.post(() -> {
+            try {
+                MenuLayoutWidget layout = MapMenuReceiver.getMenuWidget();
+                if (layout == null) { Log.w(TAG, "getMenuWidget() returned null"); return; }
 
-            float span  = menu.getButtonSpan();
-            float width = menu.getButtonWidth();
-
-            // Grab the button background from an existing menu button so our
-            // buttons render with the same dark-arc appearance as ATAK's own
-            // radial buttons instead of as a plain black rectangle.
-            WidgetBackground bg = extractMenuBackground(menu);
-
-            WidgetIcon radioIcon = buildRadioIcon();
-
-            // ── SECOND LEVEL: the actual transmit action button ─────────────────
-            MapMenuButtonWidget txBtn = new MapMenuButtonWidget(ctx);
-            txBtn.setButtonSize(span, width);
-            if (bg != null) txBtn.setBackground(bg.copy());
-            if (radioIcon != null) txBtn.setIcon(radioIcon);
-            txBtn.setText("Send HBC");
-
-            final MapItem target = item;
-            txBtn.setOnButtonClickHandler(
-                new gov.tak.api.widgets.IMapMenuButtonWidget.OnButtonClickHandler() {
-                    @Override public boolean isSupported(Object o) { return true; }
-                    @Override public void performAction(Object o) {
-                        mapComponent.transmitMapItem(target);
+                // The displayed MapMenuWidget ring is a child of the layout
+                MapMenuWidget ring = null;
+                for (MapWidget child : layout.getChildWidgets()) {
+                    if (child instanceof MapMenuWidget) {
+                        ring = (MapMenuWidget) child;
+                        break;
                     }
-                });
+                }
+                // Fallback: treat layout itself as the ring if no child ring found
+                if (ring == null) {
+                    Log.w(TAG, "No MapMenuWidget child found, skipping");
+                    return;
+                }
 
-            // ── SECOND-LEVEL MENU: same pattern as ATAK's SEND submenu ─────────
-            MapMenuWidget subMenu = new MapMenuWidget();
-            subMenu.setCoveredAngle(span);   // one button → its full angle
-            subMenu.setButtonWidth(width);
-            subMenu.addChildWidget(txBtn);
+                addTxButton(ring, item);
 
-            // ── FIRST LEVEL: radio icon button that opens the submenu ─────────
-            MapMenuButtonWidget radioBtn = new MapMenuButtonWidget(ctx);
-            radioBtn.setButtonSize(span, width);
-            if (bg != null) radioBtn.setBackground(bg.copy());
-            if (radioIcon != null) radioBtn.setIcon(radioIcon);
-            radioBtn.setText("HBC");
-            radioBtn.setSubmenu(subMenu);    // press → second level opens
+            } catch (Exception e) {
+                Log.e(TAG, "onShowMenu post: " + e.getMessage());
+            }
+        });
 
-            menu.addChildWidget(radioBtn);
+        return false; // false = let ATAK show the normal menu too
+    }
 
-            Log.d(TAG, "HBC first→second level button added for: "
-                    + item.getMetaString("callsign", item.getUID())
-                    + " (span=" + span + ", w=" + width + ")");
+    @Override
+    public void onHideMenu(MapItem item) { /* nothing to clean up */ }
 
-        } catch (Exception e) {
-            Log.e(TAG, "updateMenu failed: " + e.getMessage());
-        }
+    // ─── Button creation ─────────────────────────────────────────────────────
+
+    private void addTxButton(MapMenuWidget ring, MapItem item) {
+        Context ctx = MapView.getMapView().getContext();
+        float span  = ring.getButtonSpan();
+        float width = ring.getButtonWidth();
+
+        // Copy the background from the first existing button so ours
+        // renders as a matching dark-arc slice, not a plain rectangle.
+        WidgetBackground bg = extractMenuBackground(ring);
+
+        MapMenuButtonWidget txBtn = new MapMenuButtonWidget(ctx);
+        txBtn.setButtonSize(span, width);
+        if (bg != null) txBtn.setBackground(bg.copy());
+
+        WidgetIcon icon = buildRadioIcon();
+        if (icon != null) txBtn.setIcon(icon);
+        txBtn.setText("TX");   // user-requested short label
+
+        final MapItem target = item;
+        txBtn.setOnButtonClickHandler(
+            new gov.tak.api.widgets.IMapMenuButtonWidget.OnButtonClickHandler() {
+                @Override public boolean isSupported(Object o) { return true; }
+                @Override public void performAction(Object o) {
+                    mapComponent.transmitMapItem(target);
+                }
+            });
+
+        ring.addChildWidget(txBtn);
+        Log.i(TAG, "TX button added to live ring for: "
+                + item.getMetaString("callsign", item.getUID()));
     }
 
     /**
