@@ -73,7 +73,7 @@ public class HBCMapComponent
     // ─── Lifecycle ───────────────────────────────────────────────────────────
 
     public void start() {
-        CommsMapComponent.getInstance().addPreSendProcessor(this);
+        CommsMapComponent.getInstance().registerPreSendProcessor(this);
         if (prefs.getBoolean(PREF_RX_ENABLED, false))
             HBCAudioMonitor.getInstance().start();
         Log.d(TAG, "started");
@@ -81,18 +81,19 @@ public class HBCMapComponent
 
     public void stop() {
         HBCAudioMonitor.getInstance().stop();
-        CommsMapComponent.getInstance().removePreSendProcessor(this);
+        // No unregisterPreSendProcessor in ATAK 5.7 API; use txEnabled flag to suppress TX
+        prefs.edit().putBoolean(PREF_TX_ENABLED, false).apply();
         Log.d(TAG, "stopped");
     }
 
     // ─── PreSendProcessor (TX path) ──────────────────────────────────────────
 
     @Override
-    public boolean processCotEvent(CotEvent event, android.os.Bundle bundle) {
-        if (!prefs.getBoolean(PREF_TX_ENABLED, false)) return true;
-        if (event == null || !event.isValid())          return true;
+    public void processCotEvent(CotEvent event, String[] extras) {
+        // extras contains destination UIDs (null/empty = broadcast); we always broadcast
+        if (!prefs.getBoolean(PREF_TX_ENABLED, false)) return;
+        if (event == null || !event.isValid())          return;
         new Thread(() -> transmitCoT(event), "HBC-TX-prep").start();
-        return true;
     }
 
     private void transmitCoT(CotEvent event) {
@@ -126,7 +127,8 @@ public class HBCMapComponent
         try {
             CotEvent event = CotEvent.parse(cotXml);
             if (event == null || !event.isValid()) { Log.w(TAG, "Invalid RX CoT"); return; }
-            CotMapComponent.getInstance().getInternalDispatcher().dispatchEvent(event, null);
+            // getInternalDispatcher() is static in ATAK 5.7; dispatch() takes a CotEvent
+            CotMapComponent.getInternalDispatcher().dispatch(event);
             Log.i(TAG, "RX injected: " + event.getUID());
         } catch (Exception e) {
             Log.e(TAG, "injectCoT: " + e.getMessage());

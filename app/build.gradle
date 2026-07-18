@@ -169,6 +169,10 @@ android {
 
 dependencies {
     implementation fileTree(dir: 'libs', include: '*.jar')
+
+    // ATAK API — compile-only; the ATAK app provides these classes at runtime.
+    // main.jar is taken from the SDK already in this project folder.
+    compileOnly files('../ATAK-CIV-5.7.0.10-SDK/ATAK-CIV-5.7.0.10-SDK/main.jar')
 }
 
 // Pin androidx versions that ATAK already bundles to avoid conflicts
