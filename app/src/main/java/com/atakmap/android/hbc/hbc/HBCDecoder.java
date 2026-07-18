@@ -51,7 +51,7 @@ public class HBCDecoder {
             ? UUID.randomUUID().toString()
             : HBC_UID_PREFIX + "-" + callsign.toUpperCase();
 
-        String cotType = isSpot ? "a-u-G" : "a-f-G-U-C";
+        String cotType = isSpot ? "a-u-G" : "a-f-G";
         String how     = isSpot ? "h-g-i-g-o" : "m-g";
         String now     = nowTs();
         String stale   = isSpot ? staleTs(525600) : staleTs(5); // 1yr vs 5min

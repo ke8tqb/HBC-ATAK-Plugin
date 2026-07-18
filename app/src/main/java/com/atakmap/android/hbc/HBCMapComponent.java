@@ -127,7 +127,18 @@ public class HBCMapComponent
         try {
             CotEvent event = CotEvent.parse(cotXml);
             if (event == null || !event.isValid()) { Log.w(TAG, "Invalid RX CoT"); return; }
-            // getInternalDispatcher() is static in ATAK 5.7; dispatch() takes a CotEvent
+
+            // Self-echo suppression: if we hear our own transmission, discard it.
+            // HBC PLI UIDs follow the pattern "HBC-{CALLSIGN}" (or "HBC-{CALLSIGN}-911").
+            String myCallsign = prefs.getString(PREF_CALLSIGN, "").toUpperCase().trim();
+            if (!myCallsign.isEmpty()) {
+                String uid = event.getUID();
+                if (uid != null && uid.startsWith("HBC-" + myCallsign)) {
+                    Log.d(TAG, "Self-echo suppressed: " + uid);
+                    return;
+                }
+            }
+
             CotMapComponent.getInternalDispatcher().dispatch(event);
             Log.i(TAG, "RX injected: " + event.getUID());
         } catch (Exception e) {
