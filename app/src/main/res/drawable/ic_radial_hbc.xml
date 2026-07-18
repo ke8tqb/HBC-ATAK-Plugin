@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Radio transmitter icon for the HBC radial menu button.
+    Bold, high-contrast design readable at the small size used in ATAK radial menus.
+    White paths on transparent background — ATAK radial buttons apply their own background.
+    100x100 viewport for precise arc curves.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="100"
+    android:viewportHeight="100">
+
+    <!-- ── Antenna mast (thick vertical pole) ───────────────────────── -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="8"
+        android:fillColor="#00000000"
+        android:strokeLineCap="round"
+        android:pathData="M50,90 L50,46" />
+
+    <!-- ── Horizontal base ──────────────────────────────────────────── -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="8"
+        android:fillColor="#00000000"
+        android:strokeLineCap="round"
+        android:pathData="M24,90 L76,90" />
+
+    <!-- ── Left leg ─────────────────────────────────────────────────── -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="6"
+        android:fillColor="#00000000"
+        android:strokeLineCap="round"
+        android:pathData="M24,90 L8,100" />
+
+    <!-- ── Right leg ────────────────────────────────────────────────── -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="6"
+        android:fillColor="#00000000"
+        android:strokeLineCap="round"
+        android:pathData="M76,90 L92,100" />
+
+    <!-- ── Dot at antenna tip ───────────────────────────────────────── -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M50,46 m-6,0 a6,6 0 1,0 12,0 a6,6 0 1,0 -12,0" />
+
+    <!--
+      Radio wave arcs — upward from tip at (50,46)
+      Arc math: start/end at same Y=46, sweep=1 for upward curve
+        Wave 1: endpoints (38,46)→(62,46), r=13  → apex ≈y=36 (+10 up)
+        Wave 2: endpoints (26,46)→(74,46), r=25  → apex ≈y=22 (+24 up)
+        Wave 3: endpoints (12,46)→(88,46), r=40  → apex ≈y=8  (+38 up)
+    -->
+
+    <!-- ── Wave 1 — inner ───────────────────────────────────────────── -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="6"
+        android:fillColor="#00000000"
+        android:strokeLineCap="round"
+        android:pathData="M38,46 A13,13 0 0,1 62,46" />
+
+    <!-- ── Wave 2 — middle ──────────────────────────────────────────── -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="5"
+        android:fillColor="#00000000"
+        android:strokeLineCap="round"
+        android:pathData="M26,46 A25,25 0 0,1 74,46" />
+
+    <!-- ── Wave 3 — outer ───────────────────────────────────────────── -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="4"
+        android:fillColor="#00000000"
+        android:strokeLineCap="round"
+        android:pathData="M12,46 A40,40 0 0,1 88,46" />
+
+</vector>

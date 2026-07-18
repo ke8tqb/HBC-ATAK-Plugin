@@ -16,6 +16,16 @@ import android.widget.EditText;
 import android.widget.Spinner;
 import android.widget.Switch;
 
+import com.atakmap.android.maps.MapItem;
+import com.atakmap.android.maps.PointMapItem;
+import com.atakmap.android.menu.MapMenuReceiver;
+import com.atakmap.coremap.maps.coords.GeoPoint;
+
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Locale;
+import java.util.TimeZone;
+
 import com.atakmap.android.cot.CotMapComponent;
 import com.atakmap.android.maps.MapView;
 import com.atakmap.comms.CommsMapComponent;
@@ -65,6 +75,9 @@ public class HBCMapComponent
     // Reference to the settings pane view so the AudioDeviceCallback can refresh spinners
     private View settingsRoot = null;
 
+    // Radial menu handler — adds HBC TX button to every selected map item
+    private HBCMapMenuHandler menuHandler;
+
     // Refreshes spinners when USB audio devices are connected or disconnected
     private final AudioDeviceCallback deviceCallback = new AudioDeviceCallback() {
         @Override
@@ -96,6 +109,9 @@ public class HBCMapComponent
         // Listen for USB audio devices being plugged/unplugged
         AudioManager am = (AudioManager) pluginContext.getSystemService(Context.AUDIO_SERVICE);
         am.registerAudioDeviceCallback(deviceCallback, mainHandler);
+        // Register radial menu handler to add HBC TX button on any selected map item
+        menuHandler = new HBCMapMenuHandler(pluginContext, this);
+        MapMenuReceiver.getInstance().registerMapMenuHandler(menuHandler);
         Log.d(TAG, "started");
     }
 
@@ -103,6 +119,10 @@ public class HBCMapComponent
         HBCAudioMonitor.getInstance().stop();
         AudioManager am = (AudioManager) pluginContext.getSystemService(Context.AUDIO_SERVICE);
         am.unregisterAudioDeviceCallback(deviceCallback);
+        if (menuHandler != null) {
+            MapMenuReceiver.getInstance().unregisterMapMenuHandler(menuHandler);
+            menuHandler = null;
+        }
         // No unregisterPreSendProcessor in ATAK 5.7 API; use txEnabled flag to suppress TX
         prefs.edit().putBoolean(PREF_TX_ENABLED, false).apply();
         settingsRoot = null;
@@ -296,6 +316,65 @@ public class HBCMapComponent
             if (!contactCs.isEmpty() && contactCs.equals(cs7)) return true;
         }
         return false;
+    }
+
+    /**
+     * Encodes the selected map item's position as HBC and transmits it via audio.
+     * Called from HBCMapMenuHandler when the user presses the radial HBC TX button.
+     */
+    public void transmitMapItem(MapItem item) {
+        if (!(item instanceof PointMapItem)) {
+            Log.w(TAG, "transmitMapItem: item has no point position");
+            return;
+        }
+        new Thread(() -> {
+            try {
+                GeoPoint gp = ((PointMapItem) item).getPoint();
+                if (gp == null) { Log.w(TAG, "transmitMapItem: null GeoPoint"); return; }
+
+                String uid      = item.getUID();
+                String type     = item.getType();
+                String callsign = item.getMetaString("callsign", uid);
+
+                SimpleDateFormat fmt = new SimpleDateFormat(
+                    "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US);
+                fmt.setTimeZone(TimeZone.getTimeZone("UTC"));
+                String now   = fmt.format(new Date());
+                String stale = fmt.format(new Date(System.currentTimeMillis() + 5 * 60_000L));
+                double hae   = gp.isAltitudeValid() ? gp.getAltitude() : 9999999;
+
+                String xml = "<event version=\"2.0\" uid=\"" + uid
+                    + "\" type=\"" + type
+                    + "\" time=\"" + now
+                    + "\" start=\"" + now
+                    + "\" stale=\"" + stale
+                    + "\" how=\"m-g\" access=\"Undefined\">"
+                    + "<point lat=\"" + gp.getLatitude()
+                    + "\" lon=\"" + gp.getLongitude()
+                    + "\" hae=\"" + hae
+                    + "\" ce=\"9999999\" le=\"9999999\" />"
+                    + "<detail>"
+                    + "<contact callsign=\"" + callsign + "\" />"
+                    + "<uid Droid=\"" + callsign + "\" />"
+                    + "<track speed=\"0.0\" course=\"9999999.0\" />"
+                    + "</detail></event>";
+
+                byte[] hbc = HBCEncoder.encode(xml);
+                if (hbc == null) { Log.w(TAG, "transmitMapItem: encoder returned null"); return; }
+
+                String myCS = prefs.getString(PREF_CALLSIGN, "NOCALL");
+                RadioAudioTransmitter.getInstance()
+                    .setPttDelayMs(prefs.getInt(PREF_PTT_DELAY_MS, 0));
+                short[] audio = OFDMModem.getInstance()
+                    .encodeHBC(hbc, myCS, RadioAudioTransmitter.SAMPLE_RATE);
+                if (audio != null) {
+                    RadioAudioTransmitter.getInstance().transmit(audio);
+                    Log.i(TAG, "Radial TX: " + callsign + " @ " + gp.getLatitude() + "," + gp.getLongitude());
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "transmitMapItem: " + e.getMessage());
+            }
+        }, "HBC-TX-radial").start();
     }
 
     public void setRxEnabled(boolean on) {
