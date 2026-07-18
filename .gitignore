@@ -22,3 +22,8 @@ local.properties
 
 # Windows
 Thumbs.db
+
+# ATAK SDK (large — not committed)
+ATAK-CIV-5.7.0.10-SDK/
+ATAK-CIV-5.7.0.10-SDK.zip
+
