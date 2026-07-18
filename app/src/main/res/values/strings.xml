@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">HBC Radio Plugin</string>
-    <string name="app_desc">Ham Binary Cursor on Target — sends and receives CoT over OFDM audio via ham radio</string>
+    <string name="app_name">HBC Audio</string>
+    <string name="app_desc">Ham Binary CoT over OFDM audio for ham radio</string>
 </resources>

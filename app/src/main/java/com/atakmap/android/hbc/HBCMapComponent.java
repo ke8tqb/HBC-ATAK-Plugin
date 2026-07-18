@@ -146,6 +146,70 @@ public class HBCMapComponent
         }
     }
 
+    /**
+     * Immediately transmit the user's current position from the ATAK self-marker.
+     * Called when the user presses the "Send My Position Now" button.
+     */
+    public void sendManualPLI() {
+        new Thread(() -> {
+            try {
+                com.atakmap.android.maps.MapView mv = com.atakmap.android.maps.MapView.getMapView();
+                if (mv == null) { Log.w(TAG, "MapView not available"); return; }
+
+                com.atakmap.android.maps.Marker self = mv.getSelfMarker();
+                if (self == null) { Log.w(TAG, "No self marker — no GPS fix?"); return; }
+
+                com.atakmap.coremap.maps.coords.GeoPoint gp = self.getPoint();
+                if (gp == null) { Log.w(TAG, "Self marker has no GeoPoint"); return; }
+
+                String uid      = self.getUID();
+                String type     = self.getType();
+                String callsign = prefs.getString(PREF_CALLSIGN, uid);
+
+                java.text.SimpleDateFormat fmt = new java.text.SimpleDateFormat(
+                    "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US);
+                fmt.setTimeZone(java.util.TimeZone.getTimeZone("UTC"));
+                String now   = fmt.format(new java.util.Date());
+                String stale = fmt.format(new java.util.Date(
+                    System.currentTimeMillis() + 5 * 60_000L));
+
+                double hae = gp.isAltitudeValid() ? gp.getAltitude() : 9999999;
+
+                String xml = "<event version=\"2.0\" uid=\"" + uid
+                    + "\" type=\"" + type
+                    + "\" time=\"" + now
+                    + "\" start=\"" + now
+                    + "\" stale=\"" + stale
+                    + "\" how=\"m-g\" access=\"Undefined\">"
+                    + "<point lat=\"" + gp.getLatitude()
+                    + "\" lon=\"" + gp.getLongitude()
+                    + "\" hae=\"" + hae
+                    + "\" ce=\"9999999\" le=\"9999999\" />"
+                    + "<detail>"
+                    + "<contact callsign=\"" + callsign + "\" />"
+                    + "<uid Droid=\"" + callsign + "\" />"
+                    + "<track speed=\"0.0\" course=\"9999999.0\" />"
+                    + "</detail></event>";
+
+                byte[] hbc = HBCEncoder.encode(xml);
+                if (hbc == null) { Log.w(TAG, "Manual PLI: encoder returned null"); return; }
+
+                String myCS = prefs.getString(PREF_CALLSIGN, "NOCALL");
+                RadioAudioTransmitter.getInstance()
+                    .setPttDelayMs(prefs.getInt(PREF_PTT_DELAY_MS, 0));
+                short[] audio = OFDMModem.getInstance()
+                    .encodeHBC(hbc, myCS, RadioAudioTransmitter.SAMPLE_RATE);
+                if (audio != null) {
+                    RadioAudioTransmitter.getInstance().transmit(audio);
+                    Log.i(TAG, "Manual PLI transmitted: " + callsign
+                        + " @ " + gp.getLatitude() + "," + gp.getLongitude());
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "sendManualPLI: " + e.getMessage());
+            }
+        }, "HBC-TX-manual").start();
+    }
+
     public void setRxEnabled(boolean on) {
         prefs.edit().putBoolean(PREF_RX_ENABLED, on).apply();
         if (on) HBCAudioMonitor.getInstance().start();
@@ -155,6 +219,11 @@ public class HBCMapComponent
     // ─── Settings pane binding ───────────────────────────────────────────────
 
     public void bindSettingsView(View root) {
+        // Manual TX button — sends own position immediately
+        android.widget.Button txNowBtn = root.findViewById(R.id.hbc_btn_tx_now);
+        if (txNowBtn != null)
+            txNowBtn.setOnClickListener(v -> sendManualPLI());
+
         Switch txSwitch = root.findViewById(R.id.hbc_switch_tx);
         if (txSwitch != null) {
             txSwitch.setChecked(prefs.getBoolean(PREF_TX_ENABLED, false));

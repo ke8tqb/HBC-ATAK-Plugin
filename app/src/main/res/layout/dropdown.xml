@@ -12,23 +12,35 @@
         android:divider="@android:drawable/divider_horizontal_dark"
         android:showDividers="middle">
 
-        <!-- ═══ Title ═══════════════════════════════════════════════════════ -->
+        <!-- ═══ Title ══════════════════════════════════════════ -->
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="HBC Radio Plugin"
+            android:text="HBC Audio"
             android:textColor="#FFFFFF"
             android:textSize="20sp"
             android:textStyle="bold"
-            android:paddingBottom="8dp" />
+            android:paddingBottom="4dp" />
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Ham Binary Cursor on Target — OFDM Audio Transport"
+            android:text="Ham Binary CoT over OFDM audio for ham radio"
             android:textColor="#AAAAAA"
             android:textSize="12sp"
             android:paddingBottom="16dp" />
+
+        <!-- ═══ Send My Position ══════════════════════════════════ -->
+        <Button
+            android:id="@+id/hbc_btn_tx_now"
+            android:layout_width="match_parent"
+            android:layout_height="60dp"
+            android:text="📡  SEND MY POSITION NOW"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:textColor="#000000"
+            android:backgroundTint="#33FF66"
+            android:layout_marginBottom="16dp" />
 
         <!-- ═══ TX ════════════════════════════════════════════════════════ -->
         <LinearLayout
