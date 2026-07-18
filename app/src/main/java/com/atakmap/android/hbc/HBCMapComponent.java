@@ -394,29 +394,34 @@ public class HBCMapComponent
 
         // ── Create the TX button ─────────────────────────────────────
         txOverlayBtn = new Button(ctx);
-        txOverlayBtn.setText("📡  TX");
-        txOverlayBtn.setTextSize(18f);
+        txOverlayBtn.setText("HBC TX");           // plain text, no emoji
+        txOverlayBtn.setTextSize(20f);
         txOverlayBtn.setTextColor(0xFF000000);
         txOverlayBtn.setBackgroundColor(0xFF33FF66);  // ATAK green
         txOverlayBtn.setPadding(48, 24, 48, 24);
         txOverlayBtn.setVisibility(View.GONE);
-        txOverlayBtn.setElevation(12f);               // float above the map
+        txOverlayBtn.setElevation(16f);
         txOverlayBtn.setOnClickListener(v -> {
             if (overlayItem != null)
                 transmitMapItem(overlayItem);
         });
 
-        // Position at bottom-center, above the ATAK nav bar
+        // addContentView() always adds on top of everything in the Activity's
+        // FrameLayout — more reliable than navigating MapView.getParent().
         android.widget.FrameLayout.LayoutParams lp =
             new android.widget.FrameLayout.LayoutParams(
                 android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
                 android.widget.FrameLayout.LayoutParams.WRAP_CONTENT);
-        lp.gravity     = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
-        lp.bottomMargin = 180;  // clear the ATAK bottom toolbar
+        lp.gravity      = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
+        lp.bottomMargin = 200;
 
-        ViewGroup parent = (ViewGroup) mv.getParent();
-        if (parent == null) { Log.w(TAG, "MapView has no parent"); return; }
-        parent.addView(txOverlayBtn, lp);
+        try {
+            android.app.Activity activity = (android.app.Activity) ctx;
+            activity.addContentView(txOverlayBtn, lp);
+        } catch (Exception e) {
+            Log.e(TAG, "addContentView failed: " + e.getMessage());
+            return;
+        }
 
         // ── Show on item tap ─────────────────────────────────────
         itemClickListener = event -> {
@@ -427,7 +432,7 @@ public class HBCMapComponent
                 overlayItem = item;
                 String cs = item.getMetaString("callsign", item.getUID());
                 mainHandler.post(() -> {
-                    txOverlayBtn.setText("📡  TX  " + cs);
+                    txOverlayBtn.setText("HBC TX  " + cs);
                     txOverlayBtn.setVisibility(View.VISIBLE);
                 });
             } else {
