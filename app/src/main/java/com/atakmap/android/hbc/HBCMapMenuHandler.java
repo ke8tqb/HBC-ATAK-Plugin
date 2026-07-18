@@ -10,9 +10,13 @@ import com.atakmap.android.maps.PointMapItem;
 import com.atakmap.android.menu.MapMenuButtonWidget;
 import com.atakmap.android.menu.MapMenuHandler;
 import com.atakmap.android.menu.MapMenuWidget;
+import com.atakmap.android.widgets.MapWidget;
+import com.atakmap.android.widgets.WidgetBackground;
 import com.atakmap.android.widgets.WidgetIcon;
 import com.atakmap.android.hbc.plugin.R;
 import com.atakmap.coremap.log.Log;
+
+import gov.tak.api.widgets.IWidgetBackground;
 
 /**
  * HBCMapMenuHandler
@@ -53,11 +57,17 @@ public class HBCMapMenuHandler implements MapMenuHandler {
             float span  = menu.getButtonSpan();
             float width = menu.getButtonWidth();
 
+            // Grab the button background from an existing menu button so our
+            // buttons render with the same dark-arc appearance as ATAK's own
+            // radial buttons instead of as a plain black rectangle.
+            WidgetBackground bg = extractMenuBackground(menu);
+
             WidgetIcon radioIcon = buildRadioIcon();
 
             // ── SECOND LEVEL: the actual transmit action button ─────────────────
             MapMenuButtonWidget txBtn = new MapMenuButtonWidget(ctx);
             txBtn.setButtonSize(span, width);
+            if (bg != null) txBtn.setBackground(bg.copy());
             if (radioIcon != null) txBtn.setIcon(radioIcon);
             txBtn.setText("Send HBC");
 
@@ -79,6 +89,7 @@ public class HBCMapMenuHandler implements MapMenuHandler {
             // ── FIRST LEVEL: radio icon button that opens the submenu ─────────
             MapMenuButtonWidget radioBtn = new MapMenuButtonWidget(ctx);
             radioBtn.setButtonSize(span, width);
+            if (bg != null) radioBtn.setBackground(bg.copy());
             if (radioIcon != null) radioBtn.setIcon(radioIcon);
             radioBtn.setText("HBC");
             radioBtn.setSubmenu(subMenu);    // press → second level opens
@@ -92,6 +103,25 @@ public class HBCMapMenuHandler implements MapMenuHandler {
         } catch (Exception e) {
             Log.e(TAG, "updateMenu failed: " + e.getMessage());
         }
+    }
+
+    /**
+     * Reads the WidgetBackground from the first existing MapMenuButtonWidget in the
+     * menu so our button uses the same dark-arc style as all the other radial buttons.
+     * Returns null if no background can be found (button will render plain).
+     */
+    private static WidgetBackground extractMenuBackground(MapMenuWidget menu) {
+        try {
+            for (MapWidget child : menu.getChildWidgets()) {
+                if (child instanceof MapMenuButtonWidget) {
+                    WidgetBackground bg = ((MapMenuButtonWidget) child).getBackground();
+                    if (bg != null) return bg;
+                }
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "extractMenuBackground: " + e.getMessage());
+        }
+        return null;
     }
 
     private WidgetIcon buildRadioIcon() {
