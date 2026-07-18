@@ -16,10 +16,15 @@ import android.widget.EditText;
 import android.widget.Spinner;
 import android.widget.Switch;
 
+import com.atakmap.android.maps.MapEvent;
+import com.atakmap.android.maps.MapEventDispatcher;
 import com.atakmap.android.maps.MapItem;
 import com.atakmap.android.maps.PointMapItem;
-import com.atakmap.android.menu.MapMenuReceiver;
 import com.atakmap.coremap.maps.coords.GeoPoint;
+
+import android.view.Gravity;
+import android.view.ViewGroup;
+import android.widget.Button;
 
 import java.text.SimpleDateFormat;
 import java.util.Date;
@@ -75,8 +80,11 @@ public class HBCMapComponent
     // Reference to the settings pane view so the AudioDeviceCallback can refresh spinners
     private View settingsRoot = null;
 
-    // Radial menu event listener — adds TX button after menu renders
-    private HBCMapMenuHandler menuHandler;
+    // On-screen overlay TX button (shown when a map item is selected)
+    private Button                                    txOverlayBtn;
+    private MapItem                                   overlayItem;
+    private MapEventDispatcher.MapEventDispatchListener itemClickListener;
+    private MapEventDispatcher.MapEventDispatchListener mapClickListener;
 
     // Refreshes spinners when USB audio devices are connected or disconnected
     private final AudioDeviceCallback deviceCallback = new AudioDeviceCallback() {
@@ -109,9 +117,8 @@ public class HBCMapComponent
         // Listen for USB audio devices being plugged/unplugged
         AudioManager am = (AudioManager) pluginContext.getSystemService(Context.AUDIO_SERVICE);
         am.registerAudioDeviceCallback(deviceCallback, mainHandler);
-        // Register radial menu event listener — adds TX button AFTER menu renders
-        menuHandler = new HBCMapMenuHandler(pluginContext, this);
-        MapMenuReceiver.getInstance().addEventListener(menuHandler);
+        // Show an on-screen TX button whenever a map item is selected
+        mainHandler.post(this::setupOverlayButton);
         Log.d(TAG, "started");
     }
 
@@ -119,11 +126,7 @@ public class HBCMapComponent
         HBCAudioMonitor.getInstance().stop();
         AudioManager am = (AudioManager) pluginContext.getSystemService(Context.AUDIO_SERVICE);
         am.unregisterAudioDeviceCallback(deviceCallback);
-        if (menuHandler != null) {
-            MapMenuReceiver.getInstance().removeEventListener(menuHandler);
-            menuHandler = null;
-        }
-        // No unregisterPreSendProcessor in ATAK 5.7 API; use txEnabled flag to suppress TX
+        removeOverlayButton();
         prefs.edit().putBoolean(PREF_TX_ENABLED, false).apply();
         settingsRoot = null;
         Log.d(TAG, "stopped");
@@ -375,6 +378,97 @@ public class HBCMapComponent
                 Log.e(TAG, "transmitMapItem: " + e.getMessage());
             }
         }, "HBC-TX-radial").start();
+    }
+
+    // ─── On-screen TX overlay button ──────────────────────────────────────────────
+
+    /**
+     * Creates a green "TX" button and adds it to ATAK's view hierarchy.
+     * The button appears when any non-self map marker is tapped and hides
+     * when the map background is tapped. One tap on the button transmits.
+     */
+    private void setupOverlayButton() {
+        MapView mv = MapView.getMapView();
+        if (mv == null) return;
+        Context ctx = mv.getContext();
+
+        // ── Create the TX button ─────────────────────────────────────
+        txOverlayBtn = new Button(ctx);
+        txOverlayBtn.setText("📡  TX");
+        txOverlayBtn.setTextSize(18f);
+        txOverlayBtn.setTextColor(0xFF000000);
+        txOverlayBtn.setBackgroundColor(0xFF33FF66);  // ATAK green
+        txOverlayBtn.setPadding(48, 24, 48, 24);
+        txOverlayBtn.setVisibility(View.GONE);
+        txOverlayBtn.setElevation(12f);               // float above the map
+        txOverlayBtn.setOnClickListener(v -> {
+            if (overlayItem != null)
+                transmitMapItem(overlayItem);
+        });
+
+        // Position at bottom-center, above the ATAK nav bar
+        android.widget.FrameLayout.LayoutParams lp =
+            new android.widget.FrameLayout.LayoutParams(
+                android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
+                android.widget.FrameLayout.LayoutParams.WRAP_CONTENT);
+        lp.gravity     = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
+        lp.bottomMargin = 180;  // clear the ATAK bottom toolbar
+
+        ViewGroup parent = (ViewGroup) mv.getParent();
+        if (parent == null) { Log.w(TAG, "MapView has no parent"); return; }
+        parent.addView(txOverlayBtn, lp);
+
+        // ── Show on item tap ─────────────────────────────────────
+        itemClickListener = event -> {
+            MapItem item = event.getItem();
+            if (item instanceof PointMapItem
+                    && (mv.getSelfMarker() == null
+                        || !item.getUID().equals(mv.getSelfMarker().getUID()))) {
+                overlayItem = item;
+                String cs = item.getMetaString("callsign", item.getUID());
+                mainHandler.post(() -> {
+                    txOverlayBtn.setText("📡  TX  " + cs);
+                    txOverlayBtn.setVisibility(View.VISIBLE);
+                });
+            } else {
+                // Tapped own marker or non-point item — hide
+                overlayItem = null;
+                mainHandler.post(() -> txOverlayBtn.setVisibility(View.GONE));
+            }
+        };
+        mv.getMapEventDispatcher().addMapEventListener(MapEvent.ITEM_CLICK, itemClickListener);
+
+        // ── Hide on map background tap ───────────────────────────
+        mapClickListener = event -> {
+            overlayItem = null;
+            mainHandler.post(() -> {
+                if (txOverlayBtn != null) txOverlayBtn.setVisibility(View.GONE);
+            });
+        };
+        mv.getMapEventDispatcher().addMapEventListener(
+            MapEvent.MAP_CONFIRMED_CLICK, mapClickListener);
+
+        Log.d(TAG, "TX overlay button added to map view");
+    }
+
+    private void removeOverlayButton() {
+        MapView mv = MapView.getMapView();
+        if (mv != null && itemClickListener != null)
+            mv.getMapEventDispatcher().removeMapEventListener(MapEvent.ITEM_CLICK, itemClickListener);
+        if (mv != null && mapClickListener != null)
+            mv.getMapEventDispatcher().removeMapEventListener(
+                MapEvent.MAP_CONFIRMED_CLICK, mapClickListener);
+        itemClickListener = null;
+        mapClickListener  = null;
+        overlayItem       = null;
+        final Button btn  = txOverlayBtn;
+        txOverlayBtn      = null;
+        if (btn != null) {
+            mainHandler.post(() -> {
+                ViewGroup p = (ViewGroup) btn.getParent();
+                if (p != null) p.removeView(btn);
+            });
+        }
     }
 
     public void setRxEnabled(boolean on) {
