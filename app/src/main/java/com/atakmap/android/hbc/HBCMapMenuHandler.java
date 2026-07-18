@@ -49,15 +49,23 @@ public class HBCMapMenuHandler implements MapMenuHandler {
         }
 
         try {
-            // ── Create the HBC transmit button ─────────────────────────────
-            MapMenuButtonWidget btn = new MapMenuButtonWidget(pluginContext);
+            // Use ATAK's own context for the button — MapMenuButtonWidget needs ATAK's
+            // display metrics and resource system, not the isolated plugin context.
+            Context atakCtx = MapView.getMapView() != null
+                    ? MapView.getMapView().getContext() : pluginContext;
 
-            // Set the radio transmitter icon
+            // ── Create the HBC transmit button ────────────────────────────────
+            MapMenuButtonWidget btn = new MapMenuButtonWidget(atakCtx);
+
+            // Match the button's size to the menu's layout so it renders correctly.
+            // Without this, the button has zero span/width and is invisible.
+            btn.setButtonSize(menu.getButtonSpan(), menu.getButtonWidth());
+
+            // Set the radio transmitter icon from the plugin's resources
             String iconUri = "android.resource://"
                     + pluginContext.getPackageName()
                     + "/" + R.drawable.ic_radial_hbc;
             MapDataRef ref = MapDataRef.parseUri(iconUri);
-            // 40×40 looks crisp inside ATAK's radial button circles (~80dp radius)
             WidgetIcon icon = new WidgetIcon(ref, new Point(0, 0), 40, 40);
             btn.setIcon(icon);
             btn.setText("HBC TX");
@@ -68,7 +76,7 @@ public class HBCMapMenuHandler implements MapMenuHandler {
                 new gov.tak.api.widgets.IMapMenuButtonWidget.OnButtonClickHandler() {
                     @Override
                     public boolean isSupported(Object mapItem) {
-                        return true; // show button for all supported items
+                        return true;
                     }
                     @Override
                     public void performAction(Object mapItem) {
@@ -76,9 +84,11 @@ public class HBCMapMenuHandler implements MapMenuHandler {
                     }
                 });
 
-            // ── Add our button to the existing radial menu ──────────────────
-            menu.addWidget(btn);
-            Log.d(TAG, "HBC TX button added for: " + item.getMetaString("callsign", item.getUID()));
+            // ── Add to existing radial menu (addChildWidget is the IMapWidget API) ──
+            menu.addChildWidget(btn);
+            Log.d(TAG, "HBC TX button added (span=" + menu.getButtonSpan()
+                    + " w=" + menu.getButtonWidth() + ") for: "
+                    + item.getMetaString("callsign", item.getUID()));
 
         } catch (Exception e) {
             Log.e(TAG, "updateMenu failed: " + e.getMessage());
