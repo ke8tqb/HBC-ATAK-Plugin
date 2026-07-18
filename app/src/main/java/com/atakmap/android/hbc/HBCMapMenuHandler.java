@@ -37,61 +37,72 @@ public class HBCMapMenuHandler implements MapMenuHandler {
 
     @Override
     public void updateMenu(MapItem item, MapMenuWidget menu) {
-        // Only add button for point items (markers) that have a position
+        // Only for point markers with a geographic position
         if (!(item instanceof PointMapItem)) return;
 
-        // Skip our own self-marker — no need to re-transmit own position from here
-        // (use the "Send My Position" button in the settings pane for that)
+        // Skip own self-marker (use the pane's "Send My Position" button for that)
         MapView mv = MapView.getMapView();
-        if (mv != null && mv.getSelfMarker() != null
-                && item.getUID().equals(mv.getSelfMarker().getUID())) {
-            return;
-        }
+        if (mv == null) return;
+        if (mv.getSelfMarker() != null
+                && item.getUID().equals(mv.getSelfMarker().getUID())) return;
 
         try {
-            // Use ATAK's own context for the button — MapMenuButtonWidget needs ATAK's
-            // display metrics and resource system, not the isolated plugin context.
-            Context atakCtx = MapView.getMapView() != null
-                    ? MapView.getMapView().getContext() : pluginContext;
+            // ATAK context required for widget display metrics and resources
+            Context ctx = mv.getContext();
 
-            // ── Create the HBC transmit button ────────────────────────────────
-            MapMenuButtonWidget btn = new MapMenuButtonWidget(atakCtx);
+            float span  = menu.getButtonSpan();
+            float width = menu.getButtonWidth();
 
-            // Match the button's size to the menu's layout so it renders correctly.
-            // Without this, the button has zero span/width and is invisible.
-            btn.setButtonSize(menu.getButtonSpan(), menu.getButtonWidth());
+            WidgetIcon radioIcon = buildRadioIcon();
 
-            // Set the radio transmitter icon from the plugin's resources
-            String iconUri = "android.resource://"
-                    + pluginContext.getPackageName()
-                    + "/" + R.drawable.ic_radial_hbc;
-            MapDataRef ref = MapDataRef.parseUri(iconUri);
-            WidgetIcon icon = new WidgetIcon(ref, new Point(0, 0), 40, 40);
-            btn.setIcon(icon);
-            btn.setText("HBC TX");
+            // ── SECOND LEVEL: the actual transmit action button ─────────────────
+            MapMenuButtonWidget txBtn = new MapMenuButtonWidget(ctx);
+            txBtn.setButtonSize(span, width);
+            if (radioIcon != null) txBtn.setIcon(radioIcon);
+            txBtn.setText("Send HBC");
 
-            // ── Click: transmit the item via HBC audio ──────────────────────
-            final MapItem targetItem = item;
-            btn.setOnButtonClickHandler(
+            final MapItem target = item;
+            txBtn.setOnButtonClickHandler(
                 new gov.tak.api.widgets.IMapMenuButtonWidget.OnButtonClickHandler() {
-                    @Override
-                    public boolean isSupported(Object mapItem) {
-                        return true;
-                    }
-                    @Override
-                    public void performAction(Object mapItem) {
-                        mapComponent.transmitMapItem(targetItem);
+                    @Override public boolean isSupported(Object o) { return true; }
+                    @Override public void performAction(Object o) {
+                        mapComponent.transmitMapItem(target);
                     }
                 });
 
-            // ── Add to existing radial menu (addChildWidget is the IMapWidget API) ──
-            menu.addChildWidget(btn);
-            Log.d(TAG, "HBC TX button added (span=" + menu.getButtonSpan()
-                    + " w=" + menu.getButtonWidth() + ") for: "
-                    + item.getMetaString("callsign", item.getUID()));
+            // ── SECOND-LEVEL MENU: same pattern as ATAK's SEND submenu ─────────
+            MapMenuWidget subMenu = new MapMenuWidget();
+            subMenu.setCoveredAngle(span);   // one button → its full angle
+            subMenu.setButtonWidth(width);
+            subMenu.addChildWidget(txBtn);
+
+            // ── FIRST LEVEL: radio icon button that opens the submenu ─────────
+            MapMenuButtonWidget radioBtn = new MapMenuButtonWidget(ctx);
+            radioBtn.setButtonSize(span, width);
+            if (radioIcon != null) radioBtn.setIcon(radioIcon);
+            radioBtn.setText("HBC");
+            radioBtn.setSubmenu(subMenu);    // press → second level opens
+
+            menu.addChildWidget(radioBtn);
+
+            Log.d(TAG, "HBC first→second level button added for: "
+                    + item.getMetaString("callsign", item.getUID())
+                    + " (span=" + span + ", w=" + width + ")");
 
         } catch (Exception e) {
             Log.e(TAG, "updateMenu failed: " + e.getMessage());
+        }
+    }
+
+    private WidgetIcon buildRadioIcon() {
+        try {
+            String uri = "android.resource://"
+                    + pluginContext.getPackageName()
+                    + "/" + R.drawable.ic_radial_hbc;
+            return new WidgetIcon(MapDataRef.parseUri(uri), new Point(0, 0), 40, 40);
+        } catch (Exception e) {
+            Log.w(TAG, "Could not load radio icon: " + e.getMessage());
+            return null;
         }
     }
 }
