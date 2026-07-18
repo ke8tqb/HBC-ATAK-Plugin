@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- namespace is declared in app/build.gradle, not here -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.atakmap.android.hbc.plugin">
+          xmlns:tools="http://schemas.android.com/tools"
+          tools:ignore="GoogleAppIndexingWarning">
 
     <!-- Audio I/O permissions needed for radio TX/RX -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
@@ -9,21 +11,22 @@
     <application
         android:icon="@drawable/ic_launcher"
         android:label="@string/app_name"
+        android:description="@string/app_desc"
         android:allowBackup="false">
 
-        <receiver android:name="com.atakmap.android.hbc.HBCReceiver"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="com.atakmap.android.hbc.SHOW_PLUGIN" />
-                <action android:name="com.atakmap.android.hbc.REFRESH_DEVICES" />
+        <!-- Required: declares which ATAK API version this plugin targets -->
+        <meta-data android:name="plugin-api" android:value="${atakApiVersion}" />
+        <meta-data android:name="app_desc"   android:value="@string/app_desc" />
+
+        <!-- Required for plugin discovery in ATAK 4.6.0.2 and newer -->
+        <activity android:name="com.atakmap.app.component"
+            android:exported="true"
+            tools:ignore="MissingClass">
+            <intent-filter android:label="@string/app_name">
+                <action android:name="com.atakmap.app.component" />
             </intent-filter>
-        </receiver>
+        </activity>
 
     </application>
-
-    <!-- Declare which ATAK API version this plugin targets -->
-    <uses-library
-        android:name="${atakApiVersion}"
-        android:required="true" />
 
 </manifest>

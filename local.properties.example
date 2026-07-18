@@ -9,30 +9,31 @@
 sdk.dir=C\:/Users/YourName/AppData/Local/Android/Sdk
 
 ## ============================================================
-## ATAK SDK — Option A (recommended for offline builds)
-## Download ATAK-CIV SDK from https://tak.gov
-## You need a free account. Download the SDK zip for version 5.4.0.
-## Unzip it somewhere on your machine. It will contain:
-##   main.jar                 (the ATAK API classes)
-##   atak-gradle-takdev.jar   (the Gradle plugin)
-##   debug.keystore           (use this for signing debug builds)
+## ATAK SDK — Option A (recommended offline)
+## Download the ATAK-CIV SDK (version 5.6.0) from https://tak.gov
+## (free account required). Unzip it; it contains:
+##   main.jar                 (ATAK API)
+##   atak-gradle-takdev.jar   (Gradle plugin that auto-generates the debug keystore)
 ## ============================================================
 
 ## Point to the atak-gradle-takdev.jar from the unzipped SDK:
-takdev.plugin=C\:/path/to/ATAK-SDK-5.4.0/atak-gradle-takdev.jar
+takdev.plugin=C\:/path/to/ATAK-SDK-5.6.0/atak-gradle-takdev.jar
 
-## Signing keys for debug builds (use the debug.keystore from the SDK):
-takDebugKeyFile=C\:/path/to/ATAK-SDK-5.4.0/debug.keystore
-takDebugKeyFilePassword=android
-takDebugKeyAlias=androiddebugkey
-takDebugKeyPassword=android
+## NOTE: For DEBUG builds, NO signing keys are needed in local.properties.
+## The atak-gradle-takdev Gradle plugin automatically generates a debug
+## keystore at build/android_keystore (password: tnttnt, alias: wintec_mapping).
+## You only need the release keys below if you are making a release/production build.
+
+## Release signing (optional — only for production builds):
+# takReleaseKeyFile=C\:/path/to/release.keystore
+# takReleaseKeyFilePassword=YOUR_STORE_PASSWORD
+# takReleaseKeyAlias=YOUR_KEY_ALIAS
+# takReleaseKeyPassword=YOUR_KEY_PASSWORD
 
 ## ============================================================
 ## ATAK SDK — Option B (TAK Maven repository credentials)
-## Only needed if you have a TAK.gov developer account with
-## Maven repository access. Leave these commented out if using
-## Option A above.
+## If you have a TAK.gov developer account with Artifactory access:
 ## ============================================================
-# takrepo.url=https://tak.gov/nexus/repository/takdev/
+# takrepo.url=https://artifacts.tak.gov/artifactory/maven
 # takrepo.user=YOUR_USERNAME
 # takrepo.password=YOUR_PASSWORD

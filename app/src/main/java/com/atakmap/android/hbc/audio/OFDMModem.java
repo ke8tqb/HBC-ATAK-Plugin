@@ -16,13 +16,8 @@ public class OFDMModem {
 
     private static final String TAG = "OFDMModem";
 
-    static {
-        try {
-            System.loadLibrary("hbc-ofdm");
-        } catch (UnsatisfiedLinkError e) {
-            Log.e(TAG, "Failed to load libhbc-ofdm.so: " + e.getMessage());
-        }
-    }
+    // Native library is loaded by PluginNativeLoader in HBCPlugin before
+    // OFDMModem is first used. Do not call System.loadLibrary() here.
 
     // ─── Native methods ───────────────────────────────────────────────────────
 
