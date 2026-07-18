@@ -152,15 +152,25 @@ public class HBCMapComponent
             if (event == null || !event.isValid()) { Log.w(TAG, "Invalid RX CoT"); return; }
 
             // Self-echo suppression: discard anything we transmitted ourselves.
+            //
+            // HBC protocol truncates the header callsign to 8 chars (ITA2 limit)
+            // and the name field to 7 chars. When our callsign is longer, the
+            // received packet carries only the truncated prefix, so we compare
+            // against the same truncated length instead of the full string.
             String myCallsign = prefs.getString(PREF_CALLSIGN, "").toUpperCase().trim();
             if (!myCallsign.isEmpty()) {
-                // Check 1: UID pattern "HBC-{CALLSIGN}" (PLI and Alert modes)
+                // Truncated versions matching what the encoder actually transmits
+                String myCs8 = myCallsign.length() > 8 ? myCallsign.substring(0, 8) : myCallsign;
+                String myCs7 = myCallsign.length() > 7 ? myCallsign.substring(0, 7) : myCallsign;
+
+                // Check 1: UID "HBC-{callsign8}" (PLI and Alert modes)
                 String uid = event.getUID();
-                if (uid != null && uid.toUpperCase().startsWith("HBC-" + myCallsign)) {
+                if (uid != null && uid.toUpperCase().startsWith("HBC-" + myCs8)) {
                     Log.d(TAG, "Self-echo suppressed by UID: " + uid);
                     return;
                 }
-                // Check 2: <contact callsign="..."> (catches Spot mode where UID is a random UUID)
+                // Check 2: <contact callsign> (catches Spot where UID is a random UUID).
+                // Compare against 7-char truncation — same limit the name encoder uses.
                 try {
                     com.atakmap.coremap.cot.event.CotDetail detail = event.getDetail();
                     if (detail != null) {
@@ -168,7 +178,7 @@ public class HBCMapComponent
                             detail.getChild("contact");
                         if (contact != null) {
                             String cs = contact.getAttribute("callsign");
-                            if (cs != null && cs.trim().toUpperCase().equals(myCallsign)) {
+                            if (cs != null && cs.trim().toUpperCase().equals(myCs7)) {
                                 Log.d(TAG, "Self-echo suppressed by callsign: " + cs);
                                 return;
                             }
