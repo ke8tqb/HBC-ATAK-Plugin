@@ -151,40 +151,19 @@ public class HBCMapComponent
             CotEvent event = CotEvent.parse(cotXml);
             if (event == null || !event.isValid()) { Log.w(TAG, "Invalid RX CoT"); return; }
 
-            // Self-echo suppression: discard anything we transmitted ourselves.
+            // Self-echo suppression: discard any packet whose callsign matches ours.
             //
-            // HBC protocol truncates the header callsign to 8 chars (ITA2 limit)
-            // and the name field to 7 chars. When our callsign is longer, the
-            // received packet carries only the truncated prefix, so we compare
-            // against the same truncated length instead of the full string.
-            String myCallsign = prefs.getString(PREF_CALLSIGN, "").toUpperCase().trim();
-            if (!myCallsign.isEmpty()) {
-                // Truncated versions matching what the encoder actually transmits
-                String myCs8 = myCallsign.length() > 8 ? myCallsign.substring(0, 8) : myCallsign;
-                String myCs7 = myCallsign.length() > 7 ? myCallsign.substring(0, 7) : myCallsign;
-
-                // Check 1: UID "HBC-{callsign8}" (PLI and Alert modes)
-                String uid = event.getUID();
-                if (uid != null && uid.toUpperCase().startsWith("HBC-" + myCs8)) {
-                    Log.d(TAG, "Self-echo suppressed by UID: " + uid);
-                    return;
-                }
-                // Check 2: <contact callsign> (catches Spot where UID is a random UUID).
-                // Compare against 7-char truncation — same limit the name encoder uses.
-                try {
-                    com.atakmap.coremap.cot.event.CotDetail detail = event.getDetail();
-                    if (detail != null) {
-                        com.atakmap.coremap.cot.event.CotDetail contact =
-                            detail.getChild("contact");
-                        if (contact != null) {
-                            String cs = contact.getAttribute("callsign");
-                            if (cs != null && cs.trim().toUpperCase().equals(myCs7)) {
-                                Log.d(TAG, "Self-echo suppressed by callsign: " + cs);
-                                return;
-                            }
-                        }
-                    }
-                } catch (Exception ignored) {}
+            // Two authoritative sources for our own callsign:
+            //   1. The plugin's PREF_CALLSIGN setting (what the user typed in)
+            //   2. The ATAK self-marker's "callsign" meta-string (ATAK's own identity)
+            //
+            // HBC field limits: header callsign truncated to 8 chars (ITA2),
+            // name field truncated to 7 chars. Compare against the same prefix length.
+            //
+            // If EITHER source produces a match, the packet is our own echo and is dropped.
+            if (isOwnCallsign(event)) {
+                Log.d(TAG, "Self-echo suppressed: " + event.getUID());
+                return;
             }
 
             CotMapComponent.getInternalDispatcher().dispatch(event);
@@ -256,6 +235,67 @@ public class HBCMapComponent
                 Log.e(TAG, "sendManualPLI: " + e.getMessage());
             }
         }, "HBC-TX-manual").start();
+    }
+
+    /**
+     * Returns true if the CotEvent appears to have originated from this station.
+     *
+     * Checks both the UID (which carries the 8-char-truncated header callsign)
+     * and the <contact callsign> field (7-char-truncated name field) against:
+     *   - The plugin's own PREF_CALLSIGN setting
+     *   - The ATAK self-marker's callsign (ATAK's authoritative identity)
+     *
+     * Any match from either source suppresses the packet.
+     */
+    private boolean isOwnCallsign(CotEvent event) {
+        // Gather candidate "own" callsigns
+        java.util.Set<String> ownCallsigns = new java.util.LinkedHashSet<>();
+
+        // Source 1: plugin settings
+        String prefsCs = prefs.getString(PREF_CALLSIGN, "").toUpperCase().trim();
+        if (!prefsCs.isEmpty()) ownCallsigns.add(prefsCs);
+
+        // Source 2: ATAK self-marker callsign (ATAK's own identity)
+        try {
+            com.atakmap.android.maps.MapView mv = com.atakmap.android.maps.MapView.getMapView();
+            if (mv != null) {
+                com.atakmap.android.maps.Marker self = mv.getSelfMarker();
+                if (self != null) {
+                    String atakCs = self.getMetaString("callsign", "").toUpperCase().trim();
+                    if (!atakCs.isEmpty()) ownCallsigns.add(atakCs);
+                }
+            }
+        } catch (Exception ignored) {}
+
+        if (ownCallsigns.isEmpty()) return false;
+
+        String uid = event.getUID() != null ? event.getUID().toUpperCase() : "";
+
+        // Extract the <contact callsign> from the decoded CoT
+        String contactCs = "";
+        try {
+            com.atakmap.coremap.cot.event.CotDetail detail = event.getDetail();
+            if (detail != null) {
+                com.atakmap.coremap.cot.event.CotDetail contact = detail.getChild("contact");
+                if (contact != null) {
+                    String raw = contact.getAttribute("callsign");
+                    if (raw != null) contactCs = raw.trim().toUpperCase();
+                }
+            }
+        } catch (Exception ignored) {}
+
+        for (String cs : ownCallsigns) {
+            // Truncate to HBC field limits for comparison
+            String cs8 = cs.length() > 8 ? cs.substring(0, 8) : cs;
+            String cs7 = cs.length() > 7 ? cs.substring(0, 7) : cs;
+
+            // UID check: "HBC-{callsign8}" prefix
+            if (uid.startsWith("HBC-" + cs8)) return true;
+
+            // Contact callsign check: exact match against 7-char truncation
+            if (!contactCs.isEmpty() && contactCs.equals(cs7)) return true;
+        }
+        return false;
     }
 
     public void setRxEnabled(boolean on) {
