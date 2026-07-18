@@ -65,7 +65,9 @@ public class HBCPlugin implements IPlugin {
         this.toolbarItem = new ToolbarItem.Builder(
                 pluginContext.getString(R.string.app_name),
                 MarshalManager.marshal(
-                    pluginContext.getResources().getDrawable(R.drawable.ic_launcher),
+                    // Use the white, no-background version so ATAK can tint it correctly.
+                    // ic_launcher (dark bg + green) is for the plugin manager icon only.
+                    pluginContext.getResources().getDrawable(R.drawable.ic_toolbar),
                     android.graphics.drawable.Drawable.class,
                     gov.tak.api.commons.graphics.Bitmap.class))
             .setListener(new ToolbarItemAdapter() {

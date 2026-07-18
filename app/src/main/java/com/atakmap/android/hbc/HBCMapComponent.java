@@ -151,15 +151,30 @@ public class HBCMapComponent
             CotEvent event = CotEvent.parse(cotXml);
             if (event == null || !event.isValid()) { Log.w(TAG, "Invalid RX CoT"); return; }
 
-            // Self-echo suppression: if we hear our own transmission, discard it.
-            // HBC PLI UIDs follow the pattern "HBC-{CALLSIGN}" (or "HBC-{CALLSIGN}-911").
+            // Self-echo suppression: discard anything we transmitted ourselves.
             String myCallsign = prefs.getString(PREF_CALLSIGN, "").toUpperCase().trim();
             if (!myCallsign.isEmpty()) {
+                // Check 1: UID pattern "HBC-{CALLSIGN}" (PLI and Alert modes)
                 String uid = event.getUID();
-                if (uid != null && uid.startsWith("HBC-" + myCallsign)) {
-                    Log.d(TAG, "Self-echo suppressed: " + uid);
+                if (uid != null && uid.toUpperCase().startsWith("HBC-" + myCallsign)) {
+                    Log.d(TAG, "Self-echo suppressed by UID: " + uid);
                     return;
                 }
+                // Check 2: <contact callsign="..."> (catches Spot mode where UID is a random UUID)
+                try {
+                    com.atakmap.coremap.cot.event.CotDetail detail = event.getDetail();
+                    if (detail != null) {
+                        com.atakmap.coremap.cot.event.CotDetail contact =
+                            detail.getChild("contact");
+                        if (contact != null) {
+                            String cs = contact.getAttribute("callsign");
+                            if (cs != null && cs.trim().toUpperCase().equals(myCallsign)) {
+                                Log.d(TAG, "Self-echo suppressed by callsign: " + cs);
+                                return;
+                            }
+                        }
+                    }
+                } catch (Exception ignored) {}
             }
 
             CotMapComponent.getInternalDispatcher().dispatch(event);
