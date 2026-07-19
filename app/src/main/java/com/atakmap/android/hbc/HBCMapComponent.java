@@ -142,20 +142,20 @@ public class HBCMapComponent
         if (!prefs.getBoolean(PREF_TX_ENABLED, false)) return;
         if (event == null || !event.isValid())          return;
 
-        // Skip cancel/dismissal events — ATAK sends these when an alert or marker
-        // is removed. They carry no useful position update and would create
-        // "[Untitled Item]" markers on receiving devices.
-        //
-        // Two cancel patterns:
-        //   1. stale <= now  (event is already expired at send time)
-        //   2. Handled in HBCEncoder by checking <emergency cancel="true">
-        try {
-            com.atakmap.coremap.maps.time.CoordinatedTime stale = event.getStale();
-            if (stale != null && stale.getMilliseconds() <= System.currentTimeMillis()) {
-                Log.d(TAG, "Skipping expired/cancel CoT: " + event.getUID());
-                return;
-            }
-        } catch (Exception ignored) {}
+        // Skip truly expired events (stale in the past) but NOT b-a-o-can —
+        // cancel CoTs intentionally have very short stale windows (~10s) and
+        // should be transmitted as Mode 3 so receivers remove the alert marker.
+        String cotType = event.getType();
+        boolean isCancel = "b-a-o-can".equals(cotType);
+        if (!isCancel) {
+            try {
+                com.atakmap.coremap.maps.time.CoordinatedTime stale = event.getStale();
+                if (stale != null && stale.getMilliseconds() <= System.currentTimeMillis()) {
+                    Log.d(TAG, "Skipping expired CoT (stale): " + event.getUID());
+                    return;
+                }
+            } catch (Exception ignored) {}
+        }
 
         onTransmitTriggered();  // hide button + close pane + toast
         new Thread(() -> transmitCoT(event), "HBC-TX-prep").start();

@@ -30,10 +30,9 @@ public class HBCEncoder {
     private static final int HBC_VERSION   = 1;
     private static final int MAX_NAME_CHARS = 7;
 
-    // CoT types that map to Mode 2 (active alert)
-    private static final String MODE2_TYPE = "b-a-o-tbl";
-    // CoT type for alert cancellation — never encode or transmit
-    private static final String CANCEL_TYPE = "b-a-o-can";
+    // CoT types that map to specific HBC modes
+    private static final String MODE2_TYPE  = "b-a-o-tbl";   // Mode 2 — 911 alert
+    private static final String CANCEL_TYPE = "b-a-o-can";   // Mode 3 — alert cancel
 
     // CoT type prefixes for PLI (moving unit, PLI bit = 0)
     private static final String[] PLI_PREFIXES = {"a-f-G", "a-h-G", "a-n-G"};
@@ -45,12 +44,6 @@ public class HBCEncoder {
             Document doc = parseXml(cotXml);
             Element root = doc.getDocumentElement();
             String cotType = root.getAttribute("type");
-
-            // Cancel alert type — never transmit
-            if (CANCEL_TYPE.equals(cotType)) {
-                Log.d(TAG, "Skipping cancel alert CoT (b-a-o-can)");
-                return null;
-            }
 
             int mode = detectMode(cotType);
 
@@ -64,24 +57,12 @@ public class HBCEncoder {
 
             Element detail = (Element) root.getElementsByTagName("detail").item(0);
 
-            // Skip cancel/dismissal events — they have an <emergency cancel="true"> element
-            // or type="Cancel" and should not be relayed as new positions.
-            if (detail != null) {
-                Element emergency = (Element) detail.getElementsByTagName("emergency").item(0);
-                if (emergency != null) {
-                    String cancel = emergency.getAttribute("cancel");
-                    String etype  = emergency.getAttribute("type");
-                    if ("true".equalsIgnoreCase(cancel) || "Cancel".equalsIgnoreCase(etype)) {
-                        Log.d(TAG, "Skipping cancel alert CoT (type=" + cotType + ")");
-                        return null;
-                    }
-                }
-            }
-
             if (mode == 1) {
                 return encodeMode1(cotType, lat, lon, detail);
             } else if (mode == 2) {
                 return encodeMode2(cotType, lat, lon, detail);
+            } else if (mode == 3) {
+                return encodeMode3(cotType, lat, lon, detail);
             }
         } catch (Exception e) {
             Log.e(TAG, "encode() failed: " + e.getMessage());
@@ -162,7 +143,34 @@ public class HBCEncoder {
         return bw.toBytes();
     }
 
-    // ─── Helpers ─────────────────────────────────────────────────────────────
+    // ─── Mode 3: Alert Cancel ───────────────────────────────────────────
+
+    private static byte[] encodeMode3(String cotType, double lat, double lon, Element detail) {
+        // Originator is the text content of <emergency cancel="true">CALLSIGN</emergency>
+        // This is ATAK's exact format for alert cancellation (from Alerts.xml)
+        String originator = "";
+        if (detail != null) {
+            Element emergency = (Element) detail.getElementsByTagName("emergency").item(0);
+            if (emergency != null) {
+                String text = emergency.getTextContent();
+                if (text != null) originator = text.trim();
+            }
+        }
+        if (originator.isEmpty()) {
+            Log.d(TAG, "Skipping Mode 3: no originator in cancel CoT");
+            return null;
+        }
+
+        BitWriter bw = new BitWriter();
+        appendCallsign(bw, originator);  // header = originator (self-cancel)
+        appendVersion(bw);
+        appendMode(bw, 3);
+        appendName(bw, originator);      // payload: whose HBC-{CS}-911 to cancel
+        appendCoords(bw, lat, lon);
+        return bw.toBytes();
+    }
+
+    // ─── Helpers ──────────────────────────────────────────────────────────────
 
     private static void appendVersion(BitWriter bw) {
         bw.writeBits(HBC_VERSION - 1, 3);
@@ -215,7 +223,8 @@ public class HBCEncoder {
     }
 
     private static int detectMode(String cotType) {
-        if (MODE2_TYPE.equals(cotType)) return 2;
+        if (MODE2_TYPE.equals(cotType))  return 2;
+        if (CANCEL_TYPE.equals(cotType)) return 3;  // Mode 3 — Alert Cancel
         return 1;
     }
 

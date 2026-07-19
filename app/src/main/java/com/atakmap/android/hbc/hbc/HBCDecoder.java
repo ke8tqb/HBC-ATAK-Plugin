@@ -30,6 +30,7 @@ public class HBCDecoder {
 
             if (mode == 1) return decodeMode1(br, callsign, version);
             if (mode == 2) return decodeMode2(br, callsign, version);
+            if (mode == 3) return decodeMode3(br, callsign, version);
 
             Log.e(TAG, "Unsupported HBC mode: " + mode);
         } catch (Exception e) {
@@ -111,7 +112,38 @@ public class HBCDecoder {
         return sb.toString();
     }
 
-    // ─── Helpers ─────────────────────────────────────────────────────────────
+    // ─── Mode 3: Alert Cancel ───────────────────────────────────────────
+
+    private static String decodeMode3(BitReader br, String callsign, int version) throws Exception {
+        // Originator (whose HBC-{CS}-911 marker to remove) + position
+        String originator = readName(br);
+        if (originator.isEmpty()) originator = callsign;  // self-cancel fallback
+        double lat = br.readSigned(21) / 10000.0;
+        double lon = br.readSigned(22) / 10000.0;
+
+        // Derive the same UID as the original alert so ATAK removes the right marker
+        String uid  = HBC_UID_PREFIX + "-" + originator.toUpperCase() + "-911";
+        String now  = nowTs();
+        String stale = staleTs(1);  // 1 minute — cancel should expire quickly
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("<event version=\"2.0\" uid=\"").append(uid).append("\"")
+          .append(" type=\"b-a-o-can\"")
+          .append(" time=\"").append(now).append("\"")
+          .append(" start=\"").append(now).append("\"")
+          .append(" stale=\"").append(stale).append("\"")
+          .append(" how=\"m-g\" access=\"Undefined\">\n");
+        sb.append("  <point lat=\"").append(String.format(Locale.US, "%.6f", lat)).append("\"")
+          .append(" lon=\"").append(String.format(Locale.US, "%.6f", lon)).append("\"")
+          .append(" hae=\"9999999\" ce=\"9999999\" le=\"9999999\" />\n");
+        sb.append("  <detail>\n");
+        // ATAK's exact cancel format: <emergency cancel="true">CALLSIGN</emergency>
+        sb.append("    <emergency cancel=\"true\">").append(originator).append("</emergency>\n");
+        sb.append("  </detail>\n</event>");
+        return sb.toString();
+    }
+
+    // ─── Helpers ──────────────────────────────────────────────────────────────
 
     private static String readCallsign(BitReader br) {
         StringBuilder result = new StringBuilder();
