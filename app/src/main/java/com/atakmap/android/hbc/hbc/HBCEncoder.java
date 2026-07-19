@@ -30,8 +30,10 @@ public class HBCEncoder {
     private static final int HBC_VERSION   = 1;
     private static final int MAX_NAME_CHARS = 7;
 
-    // CoT types that map to Mode 2
+    // CoT types that map to Mode 2 (active alert)
     private static final String MODE2_TYPE = "b-a-o-tbl";
+    // CoT type for alert cancellation — never encode or transmit
+    private static final String CANCEL_TYPE = "b-a-o-can";
 
     // CoT type prefixes for PLI (moving unit, PLI bit = 0)
     private static final String[] PLI_PREFIXES = {"a-f-G", "a-h-G", "a-n-G"};
@@ -43,6 +45,13 @@ public class HBCEncoder {
             Document doc = parseXml(cotXml);
             Element root = doc.getDocumentElement();
             String cotType = root.getAttribute("type");
+
+            // Cancel alert type — never transmit
+            if (CANCEL_TYPE.equals(cotType)) {
+                Log.d(TAG, "Skipping cancel alert CoT (b-a-o-can)");
+                return null;
+            }
+
             int mode = detectMode(cotType);
 
             Element point = (Element) root.getElementsByTagName("point").item(0);

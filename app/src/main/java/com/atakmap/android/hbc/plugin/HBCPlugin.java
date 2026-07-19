@@ -61,6 +61,19 @@ public class HBCPlugin implements IPlugin {
         // Initialise the map component (handles CoT TX/RX, PreSendProcessor)
         this.mapComponent = new HBCMapComponent(pluginContext);
 
+        // After any TX: close the HBC Audio pane (returns ATAK to normal map view)
+        // and show ATAK's native toast as tactile confirmation of the button press.
+        final IHostUIService ui = this.uiService;
+        mapComponent.setOnTransmitCallback(() -> {
+            if (ui != null) {
+                // Close the settings pane so the user returns to the plain map
+                if (settingsPane != null && ui.isPaneVisible(settingsPane))
+                    ui.closePane(settingsPane);
+                // ATAK's own toast — brief, non-intrusive confirmation
+                ui.showToast("HBC: Transmitting...");
+            }
+        });
+
         // Build the toolbar button that opens the settings pane
         this.toolbarItem = new ToolbarItem.Builder(
                 pluginContext.getString(R.string.app_name),

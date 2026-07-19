@@ -80,6 +80,9 @@ public class HBCMapComponent
     // Reference to the settings pane view so the AudioDeviceCallback can refresh spinners
     private View settingsRoot = null;
 
+    // Called after any TX completes: close pane, hide button, show toast
+    private Runnable                                  onTransmitCallback;
+
     // On-screen overlay TX button (shown when a map item is selected)
     private Button                                    txOverlayBtn;
     private MapItem                                   overlayItem;
@@ -154,6 +157,7 @@ public class HBCMapComponent
             }
         } catch (Exception ignored) {}
 
+        onTransmitTriggered();  // hide button + close pane + toast
         new Thread(() -> transmitCoT(event), "HBC-TX-prep").start();
     }
 
@@ -216,6 +220,7 @@ public class HBCMapComponent
      * Called when the user presses the "Send My Position Now" button.
      */
     public void sendManualPLI() {
+        onTransmitTriggered();  // hide button + close pane + toast
         new Thread(() -> {
             try {
                 com.atakmap.android.maps.MapView mv = com.atakmap.android.maps.MapView.getMapView();
@@ -341,6 +346,7 @@ public class HBCMapComponent
      * Called from HBCMapMenuHandler when the user presses the radial HBC TX button.
      */
     public void transmitMapItem(MapItem item) {
+        onTransmitTriggered();  // hide button + close pane + toast
         if (!(item instanceof PointMapItem)) {
             Log.w(TAG, "transmitMapItem: item has no point position");
             return;
@@ -489,6 +495,21 @@ public class HBCMapComponent
                 if (p != null) p.removeView(btn);
             });
         }
+    }
+
+    /** Called by HBCPlugin so it can close the pane and show toast when TX fires. */
+    public void setOnTransmitCallback(Runnable cb) {
+        this.onTransmitCallback = cb;
+    }
+
+    /** Hides the green overlay button and fires the post-TX UI callback. */
+    private void onTransmitTriggered() {
+        // Hide overlay button immediately
+        mainHandler.post(() -> {
+            if (txOverlayBtn != null) txOverlayBtn.setVisibility(View.GONE);
+        });
+        // Close pane and show toast (runs on main thread via HBCPlugin)
+        if (onTransmitCallback != null) onTransmitCallback.run();
     }
 
     public void setRxEnabled(boolean on) {
