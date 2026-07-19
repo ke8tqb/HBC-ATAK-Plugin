@@ -36,7 +36,8 @@ public class HBCEncoder {
     // CoT type prefixes for PLI (moving unit, PLI bit = 0)
     private static final String[] PLI_PREFIXES = {"a-f-G", "a-h-G", "a-n-G"};
 
-    /** Encode a CoT XML string to HBC bytes. Returns null on failure. */
+    /** Encode a CoT XML string to HBC bytes. Returns null on failure or for events
+     *  that should not be transmitted (cancel events, events with no callsign). */
     public static byte[] encode(String cotXml) {
         try {
             Document doc = parseXml(cotXml);
@@ -53,6 +54,20 @@ public class HBCEncoder {
             double lon = Double.parseDouble(point.getAttribute("lon"));
 
             Element detail = (Element) root.getElementsByTagName("detail").item(0);
+
+            // Skip cancel/dismissal events — they have an <emergency cancel="true"> element
+            // or type="Cancel" and should not be relayed as new positions.
+            if (detail != null) {
+                Element emergency = (Element) detail.getElementsByTagName("emergency").item(0);
+                if (emergency != null) {
+                    String cancel = emergency.getAttribute("cancel");
+                    String etype  = emergency.getAttribute("type");
+                    if ("true".equalsIgnoreCase(cancel) || "Cancel".equalsIgnoreCase(etype)) {
+                        Log.d(TAG, "Skipping cancel alert CoT (type=" + cotType + ")");
+                        return null;
+                    }
+                }
+            }
 
             if (mode == 1) {
                 return encodeMode1(cotType, lat, lon, detail);
@@ -86,6 +101,14 @@ public class HBCEncoder {
         }
         if (name.isEmpty()) name = callsign;
 
+        // If there is genuinely no callsign, this CoT carries no identifying
+        // information and would decode as "[Untitled Item]" on the receiver.
+        // This happens with cancel/admin events — skip them.
+        if (callsign.isEmpty() && name.isEmpty()) {
+            Log.d(TAG, "Skipping Mode 1 CoT with no callsign (type=" + cotType + ")");
+            return null;
+        }
+
         BitWriter bw = new BitWriter();
         appendCallsign(bw, callsign);
         appendVersion(bw);
@@ -111,6 +134,12 @@ public class HBCEncoder {
         String origName = alertCallsign.contains("-")
             ? alertCallsign.substring(0, alertCallsign.indexOf('-'))
             : alertCallsign;
+
+        // Empty alert callsign = cancel/dismissal event with no content to relay
+        if (alertCallsign.isEmpty()) {
+            Log.d(TAG, "Skipping Mode 2 CoT with no alert callsign");
+            return null;
+        }
 
         BitWriter bw = new BitWriter();
         appendCallsign(bw, origName);

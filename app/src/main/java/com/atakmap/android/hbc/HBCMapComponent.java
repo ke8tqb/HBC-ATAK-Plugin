@@ -136,9 +136,24 @@ public class HBCMapComponent
 
     @Override
     public void processCotEvent(CotEvent event, String[] extras) {
-        // extras contains destination UIDs (null/empty = broadcast); we always broadcast
         if (!prefs.getBoolean(PREF_TX_ENABLED, false)) return;
         if (event == null || !event.isValid())          return;
+
+        // Skip cancel/dismissal events — ATAK sends these when an alert or marker
+        // is removed. They carry no useful position update and would create
+        // "[Untitled Item]" markers on receiving devices.
+        //
+        // Two cancel patterns:
+        //   1. stale <= now  (event is already expired at send time)
+        //   2. Handled in HBCEncoder by checking <emergency cancel="true">
+        try {
+            com.atakmap.coremap.maps.time.CoordinatedTime stale = event.getStale();
+            if (stale != null && stale.getMilliseconds() <= System.currentTimeMillis()) {
+                Log.d(TAG, "Skipping expired/cancel CoT: " + event.getUID());
+                return;
+            }
+        } catch (Exception ignored) {}
+
         new Thread(() -> transmitCoT(event), "HBC-TX-prep").start();
     }
 
