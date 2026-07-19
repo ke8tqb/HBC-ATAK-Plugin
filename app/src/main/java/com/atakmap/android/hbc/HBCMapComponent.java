@@ -26,6 +26,8 @@ import android.view.Gravity;
 import android.view.ViewGroup;
 import android.widget.Button;
 
+import java.util.concurrent.ConcurrentHashMap;
+
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
@@ -82,6 +84,12 @@ public class HBCMapComponent
 
     // Called after any TX completes: close pane, hide button, show toast
     private Runnable                                  onTransmitCallback;
+
+    // Tracks callsigns we recently relayed so their echoes can be suppressed.
+    // Key: first 7 chars of contact callsign (HBC name field limit), uppercase.
+    // Value: System.currentTimeMillis() at time of relay.
+    private static final long RELAY_ECHO_WINDOW_MS = 30_000L; // 30 seconds
+    private final ConcurrentHashMap<String, Long> recentlyRelayed = new ConcurrentHashMap<>();
 
     // On-screen overlay TX button (shown when a map item is selected)
     private Button                                    txOverlayBtn;
@@ -208,6 +216,36 @@ public class HBCMapComponent
                 return;
             }
 
+            // Relay-echo suppression: when the user presses HBC TX on a map marker,
+            // the radio hears the transmission and feeds it back to the RX monitor.
+            // For spots (random UID) and relayed PLI, the decoded packet would create
+            // a duplicate with a truncated name (e.g. "U.18.17" instead of "U.18.174435").
+            // Suppress any received contact callsign that was recently relayed by us.
+            try {
+                com.atakmap.coremap.cot.event.CotDetail det = event.getDetail();
+                if (det != null) {
+                    com.atakmap.coremap.cot.event.CotDetail con = det.getChild("contact");
+                    if (con != null) {
+                        String rxCs = con.getAttribute("callsign");
+                        if (rxCs != null && !rxCs.isEmpty()) {
+                            String key = rxCs.trim().toUpperCase();
+                            if (key.length() > 7) key = key.substring(0, 7);
+                            Long relayTime = recentlyRelayed.get(key);
+                            if (relayTime != null
+                                    && System.currentTimeMillis() - relayTime
+                                       < RELAY_ECHO_WINDOW_MS) {
+                                Log.d(TAG, "Relay echo suppressed: '" + key + "'");
+                                return;
+                            }
+                            // Prune expired entries
+                            recentlyRelayed.entrySet().removeIf(
+                                e -> System.currentTimeMillis() - e.getValue()
+                                     >= RELAY_ECHO_WINDOW_MS);
+                        }
+                    }
+                }
+            } catch (Exception ignored) {}
+
             CotMapComponent.getInternalDispatcher().dispatch(event);
             Log.i(TAG, "RX injected: " + event.getUID());
         } catch (Exception e) {
@@ -220,7 +258,14 @@ public class HBCMapComponent
      * Called when the user presses the "Send My Position Now" button.
      */
     public void sendManualPLI() {
-        onTransmitTriggered();  // hide button + close pane + toast
+        onTransmitTriggered();
+        // Record own callsign — already suppressed by isOwnCallsign, but
+        // adding it here keeps the relay cache consistent.
+        String myCs = prefs.getString(PREF_CALLSIGN, "").trim().toUpperCase();
+        if (!myCs.isEmpty()) {
+            String key = myCs.length() > 7 ? myCs.substring(0, 7) : myCs;
+            recentlyRelayed.put(key, System.currentTimeMillis());
+        }
         new Thread(() -> {
             try {
                 com.atakmap.android.maps.MapView mv = com.atakmap.android.maps.MapView.getMapView();
@@ -346,7 +391,17 @@ public class HBCMapComponent
      * Called from HBCMapMenuHandler when the user presses the radial HBC TX button.
      */
     public void transmitMapItem(MapItem item) {
-        onTransmitTriggered();  // hide button + close pane + toast
+        onTransmitTriggered();
+
+        // Record the item's callsign so its RX echo is suppressed for 30 s.
+        // HBC truncates the name field to 7 chars; store that same prefix.
+        String relayCs = item.getMetaString("callsign", "").trim().toUpperCase();
+        if (!relayCs.isEmpty()) {
+            String key = relayCs.length() > 7 ? relayCs.substring(0, 7) : relayCs;
+            recentlyRelayed.put(key, System.currentTimeMillis());
+            Log.d(TAG, "Relay recorded (will suppress echo): '" + key + "'");
+        }
+
         if (!(item instanceof PointMapItem)) {
             Log.w(TAG, "transmitMapItem: item has no point position");
             return;
