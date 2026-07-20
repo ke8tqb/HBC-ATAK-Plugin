@@ -144,12 +144,18 @@ Java_com_atakmap_android_hbc_audio_OFDMModem_encodeHBC(
     if (!oper_mode) oper_mode = 16;  // always transmit something
 
     // --- 5. Encode to PCM samples --------------------------------------------
+    // NOTE: No silence added here. The PTT Delay setting in RadioAudioTransmitter
+    // handles pre-signal silence for VOX/PTT keying. Adding silence here would
+    // double the lead-in and make every transmission unnecessarily longer.
+    //
+    // Frame duration at 8000 Hz (fixed regardless of payload size):
+    //   pilot (0.18s) + SC sync (0.18s) + meta (0.18s) +
+    //   4 data symbols (0.72s) + empty (0.18s) = ~1.26 s of OFDM signal
     std::vector<int16_t> outbuf;
-    outbuf.reserve(sampleRate * 10);
+    outbuf.reserve(sampleRate * 4);
 
     {
         MemWritePCM writer(outbuf, sampleRate, 1 /*mono*/);
-        writer.silence(sampleRate);  // 1-second lead-in for radio keying
 
         typedef float value;
         typedef DSP::Complex<value> cmplx;
