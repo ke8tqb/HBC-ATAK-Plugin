@@ -1,5 +1,50 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">HBC Audio</string>
-    <string name="app_desc">Ham Binary CoT over OFDM audio for ham radio</string>
+    <!-- App -->
+    <string name="app_name">HBC Radio</string>
+    <!-- description -->
+    <string name="app_desc">Ham Binary CoT (HBC) over AX.25 packet radio: encodes CoT events to compact HBC frames and transmits them as AFSK1200 audio for VOX-keyed ham radios; received audio is decoded back into ATAK.</string>
+
+    <string name="hbc_title">HBC Packet Radio Link</string>
+    <string name="hbc_stopped">STOPPED</string>
+    <string name="hbc_callsign_label">Ham Callsign (FCC ID, max 8 chars)</string>
+    <string name="hbc_callsign_hint">e.g. KE8TQB</string>
+    <string name="hbc_dest_label">AX.25 Destination</string>
+    <string name="hbc_dest_hint">HBC</string>
+    <string name="hbc_path_label">Digipeater Path (comma separated, optional)</string>
+    <string name="hbc_path_hint">e.g. WIDE1-1,WIDE2-1</string>
+    <string name="hbc_dwell_label">TX Dwell ms</string>
+    <string name="hbc_dwell_default">500</string>
+    <string name="hbc_vox_label">VOX Lead ms</string>
+    <string name="hbc_vox_default">0</string>
+    <string name="hbc_pli_rate_label">PLI min s</string>
+    <string name="hbc_pli_rate_default">60</string>
+    <string name="hbc_tx_enable">Transmit</string>
+    <string name="hbc_rx_enable">Receive</string>
+    <string name="hbc_modes_label">Message types to transmit</string>
+    <string name="hbc_mode_pli">PLI</string>
+    <string name="hbc_mode_spots">Spots</string>
+    <string name="hbc_mode_alerts">Alerts</string>
+    <string name="hbc_mode_chat">Chat</string>
+    <string name="hbc_mode_shapes">Shapes</string>
+    <string name="hbc_mode_casevac">CASEVAC</string>
+    <string name="hbc_start">Start Radio Link</string>
+    <string name="hbc_log_label">Activity Log</string>
+    <string name="hbc_tab_settings">Settings</string>
+    <string name="hbc_tab_decodes">Decodes</string>
+    <string name="hbc_decodes_title">Packet Decodes</string>
+    <string name="hbc_decodes_clear">Clear</string>
+    <string name="hbc_decodes_none">No packets decoded yet</string>
+    <string name="hbc_modem_label">Modem (must match on all stations!)</string>
+    <string-array name="hbc_modem_options">
+        <item>AFSK1200 / AX.25 (packet radio compatible)</item>
+        <item>OFDM COFDMTV (rattlegram; robust, no digipeating)</item>
+    </string-array>
+    <string name="hbc_stream_label">TX audio stream (try others if your device distorts tones)</string>
+    <string-array name="hbc_stream_options">
+        <item>Alarm (bypasses media effects)</item>
+        <item>Media</item>
+        <item>Ring</item>
+        <item>Notification</item>
+    </string-array>
 </resources>

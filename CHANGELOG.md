@@ -4,6 +4,38 @@ All notable changes to HBC Audio Plugin are documented here.
 
 ---
 
+## [0.9] — 2026-08-25 — dual-modem rework
+
+Ground-up rework of the audio layer and codec (version restarts at 0.9;
+supersedes 1.0.0).
+
+**Modems**
+- Selectable modem: AFSK1200/AX.25 (javAX25-based; digipeater-path capable,
+  packet-radio compatible) or OFDM COFDMTV (rattlegram `short`-branch
+  protocol via bundled native library, arm64/armv7/x86)
+- TX rendered fully in advance with leading/trailing silence pads;
+  MODE_STATIC playback at the device's native output rate
+- Selectable TX audio stream (Alarm default — bypasses Samsung media DSP
+  that distorted FSK), reduced drive to avoid speaker-protection limiting
+- RX via VOICE_RECOGNITION/UNPROCESSED mic sources; urgent-audio thread
+  priority on both paths
+- Automatic exclusive routing to USB audio interfaces (e.g. Digirig)
+
+**Protocol**
+- HBC v1.3 with Mode 6 Extended Marker: full CoT type, 2525C/spot-map/
+  custom-iconset icon reference, color tint; byte-for-byte cross-validated
+  against the Python reference implementation
+
+**UI / fixes**
+- Tabbed pane: Settings + dedicated Decodes log (timestamp, source, mode,
+  payload size, counter)
+- Self-heard transmissions no longer plot own PLI (AX.25 source + ATAK
+  callsign filtering); RX dedup window
+- PluginSpinner instead of stock Spinner (fixed dropdown crash)
+- License change: GPL v2+ (bundles javAX25); THIRD-PARTY.md added
+
+---
+
 ## [1.0.0] — 2026-07-18
 
 ### Initial release

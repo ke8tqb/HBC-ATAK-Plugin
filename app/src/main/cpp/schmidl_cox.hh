@@ -11,7 +11,7 @@ Copyright 2021 Ahmet Inan <inan@aicodix.de>
 #include "phasor.hh"
 #include "trigger.hh"
 
-template <typename value, typename cmplx, int search_pos, int symbol_len, int guard_len>
+template<typename value, typename cmplx, int search_pos, int symbol_len, int guard_len>
 class SchmidlCox {
 	typedef DSP::Const<value> Const;
 	static const int match_len = guard_len | 1;
