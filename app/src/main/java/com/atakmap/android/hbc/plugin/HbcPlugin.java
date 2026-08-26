@@ -412,8 +412,13 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
             case "u-d-f":     return cbOrPref(cbShapes, "mode_shapes");
             case "b-r-f-h-c": return cbOrPref(cbCasevac, "mode_casevac");
             default:
-                // other atoms become Mode 1 spots
-                if (type.startsWith("a-"))
+                // Placed markers transmit as spots (Mode 6, Mode 1 fallback):
+                //  - other atom types (a-u-G unknown ground, a-f-A aircraft, ...)
+                //  - b-m-p-* point markers: spot map (b-m-p-s-m), waypoints
+                //    (b-m-p-w), command posts (b-m-p-c-cp), etc. These were
+                //    previously dropped entirely, so colored spot-map markers
+                //    never transmitted at all.
+                if (type.startsWith("a-") || type.startsWith("b-m-p"))
                     return cbOrPref(cbSpots, "mode_spots");
                 return false;
         }
