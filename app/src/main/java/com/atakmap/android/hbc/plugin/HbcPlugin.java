@@ -479,6 +479,9 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
                     return;
             } catch (Exception ignored) {}
 
+            if (!resolveDirectMessage(dec))
+                return;
+
             String xml = dec.toXml();
             CotEvent event = CotEvent.parse(xml);
             if (event == null || !event.isValid()) {
@@ -534,6 +537,9 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
                     return;
             } catch (Exception ignored) {}
 
+            if (!resolveDirectMessage(dec))
+                return;
+
             String xml = dec.toXml();
             CotEvent event = CotEvent.parse(xml);
             if (event == null || !event.isValid()) {
@@ -548,6 +554,43 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
         } catch (Exception e) {
             Log.d(TAG, "OFDM payload not HBC: " + e.getMessage());
         }
+    }
+
+    /**
+     * Mode 3 Direct Message addressing. HBC transmits only the recipient's
+     * callsign; ATAK's chat window files a 1:1 message only when the
+     * reconstructed chatgrp/uid1 equals this device's real UID. If the DM is
+     * addressed to us (ham callsign pref or ATAK device callsign), fill in
+     * the local device UID before XML reconstruction. If it is addressed to
+     * another station, do not inject it at all.
+     *
+     * @return true when the decoded message should be dispatched into ATAK
+     */
+    private boolean resolveDirectMessage(HbcDecoder.Decoded dec) {
+        if (dec.mode != 3 || dec.chatDestKind != 2)
+            return true;   // not a direct message — nothing to resolve
+        String recipient = dec.chatRecipient == null ? "" : dec.chatRecipient.trim();
+        String myCall = prefs.getString("callsign", "");
+        String atakCallsign = null, deviceUid = null;
+        try {
+            com.atakmap.android.maps.MapView mv =
+                    com.atakmap.android.maps.MapView.getMapView();
+            if (mv != null) {
+                atakCallsign = mv.getDeviceCallsign();
+                deviceUid = mv.getSelfMarker() != null
+                        ? mv.getSelfMarker().getUID() : null;
+            }
+        } catch (Exception ignored) {}
+
+        boolean forUs = recipient.equalsIgnoreCase(myCall)
+                || (atakCallsign != null && recipient.equalsIgnoreCase(atakCallsign));
+        if (!forUs) {
+            log("RX chat: DM for '" + recipient + "' — not this station, ignored");
+            return false;
+        }
+        if (deviceUid != null && !deviceUid.isEmpty())
+            dec.chatRecipientUidOverride = deviceUid;
+        return true;
     }
 
     private static <K> void pruneOld(Map<K, Long> map, long maxAgeMs) {

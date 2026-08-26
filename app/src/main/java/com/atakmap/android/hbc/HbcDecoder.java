@@ -42,6 +42,11 @@ public final class HbcDecoder {
         public int chatDestKind;         // 0 All Chat Rooms, 1 Named Room, 2 Direct Message
         public String chatRoom = "";
         public String chatRecipient = "";
+        /** Set by the receiving plugin when the DM recipient is this device:
+         *  the local ATAK device UID. ATAK's chat service only files a 1:1
+         *  message into the chat window when chatgrp/uid1 equals the local
+         *  device UID, so the derived HBC-{CALLSIGN} UID is not enough. */
+        public String chatRecipientUidOverride = null;
         // Mode 4
         public int shapeKind;
         public int radiusM;
@@ -156,8 +161,15 @@ public final class HbcDecoder {
                 toAttr = roomId;
             } else if (chatDestKind == 2) {               // Direct Message
                 display = chatRecipient.toUpperCase();
-                destUid = UID_PREFIX + "-" + display;
-                roomId = display;
+                // Prefer the real local device UID (set by the plugin when this
+                // EUD is the recipient) so ATAK files the message into the chat
+                // window; fall back to the derived HBC contact UID otherwise.
+                destUid = chatRecipientUidOverride != null
+                        ? chatRecipientUidOverride
+                        : UID_PREFIX + "-" + display;
+                // Real ATAK 1:1 wire format uses the recipient UID as the
+                // conversation id and the peer callsign as the chatroom label.
+                roomId = destUid;
                 toAttr = destUid;
             } else {                                      // All Chat Rooms (default)
                 roomId = destUid = display = toAttr = "All Chat Rooms";
