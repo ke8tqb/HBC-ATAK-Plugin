@@ -12,12 +12,18 @@ import java.util.List;
 import javax.xml.parsers.DocumentBuilderFactory;
 
 /**
- * HBC Protocol v1.2 encoder — CoT XML string to packed HBC bytes.
- * Direct port of hbc_encoder.py (Modes 1-5).
+ * HBC Protocol v1.5 encoder — CoT XML string to packed HBC bytes.
+ * Direct port of hbc_encoder.py (Modes 1-6).
  *
  * Wire layout:
  *   Header: callsign (ITA2, CR-terminated) + version (3b, 000=v1) + mode (3b)
  *   Payload: mode-dependent (see README / hbc_encoder.py).
+ *
+ * v1.4 added a 2-bit destination-kind field to Mode 3 (All Chat Rooms /
+ * Named Room / Direct Message). v1.5 added a 2-bit Affiliation field to
+ * Mode 1 (Friendly/Hostile/Neutral/Unknown), fixing a bug where PLI always
+ * decoded as Friendly and Spot always decoded as Unknown regardless of the
+ * actual CoT type.
  */
 public final class HbcEncoder {
 
@@ -26,6 +32,21 @@ public final class HbcEncoder {
     public static final int MAX_SHAPE_POINTS = 15;
 
     private static final String[] PLI_PREFIXES = {"a-f-G", "a-h-G", "a-n-G"};
+
+    /** Mode 1 (v1.5) 2-bit Affiliation code order: 0 Friendly, 1 Hostile,
+     *  2 Neutral, 3 Unknown (also the default for non-atom types). */
+    private static final String[] AFFILIATION_PREFIXES = {"a-f-G", "a-h-G", "a-n-G", "a-u-G"};
+
+    private static int detectAffiliation(String cotType) {
+        for (int i = 0; i < AFFILIATION_PREFIXES.length; i++)
+            if (cotType.startsWith(AFFILIATION_PREFIXES[i])) return i;
+        return 3;
+    }
+
+    /** Mode 3 (v1.4) destination kinds. */
+    private static final int CHAT_DEST_ALL  = 0;
+    private static final int CHAT_DEST_ROOM = 1;
+    private static final int CHAT_DEST_DM   = 2;
 
     /** Mode 6 type-token charset: index into 0-9 (0-9), A-Z (10-35), a-z (36-61). */
     static final String TOKEN_CHARSET =
@@ -180,8 +201,10 @@ public final class HbcEncoder {
         if (name.isEmpty()) name = callsign;
 
         boolean spot = isSpot(cotType);
+        int affiliation = detectAffiliation(cotType);
         BitWriter w = header(callsign, 1);
         w.bits(spot ? 1 : 0, 1);
+        w.bits(affiliation, 2);
         w.name(name, MAX_NAME_CHARS);
         coords(w, lat, lon);
         return new Encoded(w.toBytes(), 1, callsign, cotType);
@@ -220,15 +243,48 @@ public final class HbcEncoder {
     // Mode 3 — GeoChat
     // ------------------------------------------------------------------
     private static Encoded mode3(String cotType, Element detail) throws HbcEncodeException {
-        String sender = "", message = "";
+        String sender = "", message = "", chatroom = "";
+        int destKind = CHAT_DEST_ALL;
+        String chatRoom = "", chatRecipient = "";
         if (detail != null) {
             Element chat = child(detail, "__chat");
-            if (chat != null) sender = attr(chat, "senderCallsign");
+            if (chat != null) {
+                sender = attr(chat, "senderCallsign");
+                chatroom = attr(chat, "chatroom");
+                if (chatroom.isEmpty()) chatroom = attr(chat, "id");
+                Element chatgrp = child(chat, "chatgrp");
+                int memberCount = 0;
+                if (chatgrp != null) {
+                    org.w3c.dom.NamedNodeMap attrs = chatgrp.getAttributes();
+                    for (int i = 0; i < attrs.getLength(); i++)
+                        if (attrs.item(i).getNodeName().matches("uid\\d+"))
+                            memberCount++;
+                }
+                if (chatroom.isEmpty() || chatroom.trim().equalsIgnoreCase("all chat rooms")) {
+                    destKind = CHAT_DEST_ALL;
+                } else if (memberCount >= 3) {
+                    destKind = CHAT_DEST_ROOM;
+                    chatRoom = chatroom;
+                } else {
+                    destKind = CHAT_DEST_DM;
+                    chatRecipient = chatroom;
+                }
+            }
             Element remarks = child(detail, "remarks");
             if (remarks != null && remarks.getTextContent() != null)
                 message = remarks.getTextContent().trim();
         }
         BitWriter w = header(sender, 3);
+        w.bits(destKind, 2);
+        try {
+            if (destKind == CHAT_DEST_ROOM) {
+                w.raw(Ita2.encodeText(chatRoom));
+            } else if (destKind == CHAT_DEST_DM) {
+                w.raw(Ita2.encodeCallsign(chatRecipient, MAX_CS_CHARS));
+            }
+        } catch (IllegalArgumentException e) {
+            throw new HbcEncodeException(e.getMessage());
+        }
         w.raw(Ita2.encodeText(message));
         return new Encoded(w.toBytes(), 3, sender, cotType);
     }

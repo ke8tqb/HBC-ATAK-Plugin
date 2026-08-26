@@ -17,14 +17,53 @@ public class HbcCodecTest {
           + "<track speed=\"0.0\" course=\"9999999.0\"/></detail></event>";
         check("Mode1 PLI exact hex",
                 hex(HbcEncoder.encode(pliXml).bytes),
-                "78 76 6F C2 F9 40 0C 96 8A 70 A8 A2 84 61 57 EC 3F CD 40");
+                "78 76 6F C2 F9 40 03 25 A2 9C 2A 28 A1 18 55 FB 0F F3 50");
 
         HbcDecoder.Decoded d1 = HbcDecoder.decode(HbcEncoder.encode(pliXml).bytes);
         check("Mode1 callsign", d1.callsign, "KE8TQB");
         check("Mode1 name", d1.name, "KE8TQB");
         check("Mode1 spot", String.valueOf(d1.isSpot), "false");
+        check("Mode1 affiliation", String.valueOf(d1.affiliation), "0");
         checkClose("Mode1 lat", d1.lat, 39.8718);
         checkClose("Mode1 lon", d1.lon, -98.3243);
+
+        // --- Mode 1 (v1.5): Hostile / Neutral PLI correct labeling ---
+        String hostileXml =
+            "<event version=\"2.0\" uid=\"ANDROID-hostile001\" type=\"a-h-G-U-C\" how=\"m-g\">"
+          + "<point lat=\"39.871776\" lon=\"-98.324262\" hae=\"9999999\" ce=\"9999999\" le=\"9999999\"/>"
+          + "<detail><contact callsign=\"BANDIT1\"/><uid Droid=\"BANDIT1\"/></detail></event>";
+        check("Mode1 hostile exact hex",
+                hex(HbcEncoder.encode(hostileXml).bytes),
+                "C8 D8 93 43 77 FA 00 3D 09 05 39 11 25 50 C4 C2 AF D8 7F 9A 80");
+        HbcDecoder.Decoded dHostile = HbcDecoder.decode(HbcEncoder.encode(hostileXml).bytes);
+        check("Mode1 hostile affiliation", String.valueOf(dHostile.affiliation), "1");
+        check("Mode1 hostile decoded type", extractType(dHostile.toXml()), "a-h-G");
+
+        String neutralXml =
+            "<event version=\"2.0\" uid=\"ANDROID-neutral001\" type=\"a-n-G-U-C\" how=\"m-g\">"
+          + "<point lat=\"39.871776\" lon=\"-98.324262\" hae=\"9999999\" ce=\"9999999\" le=\"9999999\"/>"
+          + "<detail><contact callsign=\"CIVIC1\"/><uid Droid=\"CIVIC1\"/></detail></event>";
+        check("Mode1 neutral exact hex",
+                hex(HbcEncoder.encode(neutralXml).bytes),
+                "71 BC 67 6E FF 40 0B 21 A4 AB 24 A1 98 98 55 FB 0F F3 50");
+        HbcDecoder.Decoded dNeutral = HbcDecoder.decode(HbcEncoder.encode(neutralXml).bytes);
+        check("Mode1 neutral affiliation", String.valueOf(dNeutral.affiliation), "2");
+        check("Mode1 neutral decoded type", extractType(dNeutral.toXml()), "a-n-G");
+
+        // Real captured Command Post (b-m-p-c-cp): 'cp' is a 2-char type token,
+        // so Mode 6 rejects it and it falls back to Mode 1. Not an 'a-' atom
+        // type at all, so it correctly reports Unknown (3).
+        String cpXml =
+            "<event version=\"2.0\" uid=\"246b95d0-ba26-4577-a1c8-918276dff506\" type=\"b-m-p-c-cp\" how=\"h-g-i-g-o\">"
+          + "<point lat=\"39.6227396\" lon=\"-84.2035144\" hae=\"9999999\" ce=\"9999999\" le=\"9999999\"/>"
+          + "<detail><creator uid=\"ANDROID-60a23e2d48e13de0\" callsign=\"FAF\" type=\"a-f-G-U-C\"/>"
+          + "<contact callsign=\"FAF.25.194409\"/></detail></event>";
+        check("Mode1 command-post exact hex",
+                hex(HbcEncoder.encode(cpXml).bytes),
+                "68 DA 80 3F 46 41 46 2E 32 35 2E 30 5E 1E 64 D9 A0");
+        HbcDecoder.Decoded dCp = HbcDecoder.decode(HbcEncoder.encode(cpXml).bytes);
+        check("Mode1 command-post affiliation", String.valueOf(dCp.affiliation), "3");
+        check("Mode1 command-post name", dCp.name, "FAF.25.");
 
         // --- Mode 1 Spot: exact bytes from README ---
         String spotXml =
@@ -71,10 +110,50 @@ public class HbcCodecTest {
           + " time=\"2026-08-19T01:15:28.47Z\">test message</remarks></detail></event>";
         check("Mode3 exact hex",
                 hex(HbcEncoder.encode(chatXml).bytes),
-                "50 5C 13 78 2A 40 50 09 60 4E 04 A5 1E 82 80");
+                "50 5C 13 78 2A 40 44 02 58 13 81 29 47 A0 A0");
         HbcDecoder.Decoded d3 = HbcDecoder.decode(HbcEncoder.encode(chatXml).bytes);
         check("Mode3 text", d3.chatText, "TEST MESSAGE");
         check("Mode3 sender", d3.callsign, "RECEIVER");
+        check("Mode3 dest kind", String.valueOf(d3.chatDestKind), "0");
+
+        // --- Mode 3 (v1.4): Named Room ---
+        String roomXml =
+            "<event version=\"2.0\" uid=\"GeoChat.S-1-5-21.9f8e7d6c.a1b2c3d4\" type=\"b-t-f\" how=\"h-g-i-g-o\">"
+          + "<point lat=\"0\" lon=\"0\" hae=\"9999999.0\" ce=\"9999999.0\" le=\"9999999.0\"/>"
+          + "<detail><__chat id=\"9f8e7d6c-0000-0000-0000-000000000000\" chatroom=\"Recon Team\""
+          + " senderCallsign=\"RECEIVER\" groupOwner=\"false\" messageId=\"a1b2c3d4-0000-0000-0000-000000000000\">"
+          + "<chatgrp id=\"9f8e7d6c-0000-0000-0000-000000000000\" uid0=\"S-1-5-21\""
+          + " uid1=\"ANDROID-aaaa\" uid2=\"ANDROID-bbbb\"/></__chat>"
+          + "<link uid=\"S-1-5-21\" type=\"a-f-G-U\" relation=\"p-p\"/>"
+          + "<remarks source=\"BAO.F.WinTAK.S-1-5-21\" to=\"Recon Team\""
+          + " time=\"2026-08-25T14:02:11.00Z\">status check</remarks></detail></event>";
+        check("Mode3 room exact hex",
+                hex(HbcEncoder.encode(roomXml).bytes),
+                "50 5C 13 78 2A 40 4A 82 EC 30 90 08 F8 82 C0 70 39 48 EA 05 CF 40");
+        HbcDecoder.Decoded dRoom = HbcDecoder.decode(HbcEncoder.encode(roomXml).bytes);
+        check("Mode3 room dest kind", String.valueOf(dRoom.chatDestKind), "1");
+        check("Mode3 room name", dRoom.chatRoom, "RECON TEAM");
+        check("Mode3 room text", dRoom.chatText, "STATUS CHECK");
+
+        // --- Mode 3 (v1.4): Direct Message ---
+        String dmXml =
+            "<event version=\"2.0\" uid=\"GeoChat.S-1-5-21.c07f979e.e0295a69\" type=\"b-t-f\" how=\"h-g-i-g-o\">"
+          + "<point lat=\"0\" lon=\"0\" hae=\"9999999.0\" ce=\"9999999.0\" le=\"9999999.0\"/>"
+          + "<detail><__chat id=\"c07f979e-0000-0000-0000-000000000000\" chatroom=\"ONYX\""
+          + " senderCallsign=\"RECEIVER\" groupOwner=\"false\" messageId=\"e0295a69-0000-0000-0000-000000000000\">"
+          + "<chatgrp id=\"c07f979e-0000-0000-0000-000000000000\" uid0=\"S-1-5-21\""
+          + " uid1=\"ANDROID-onyxuid\"/></__chat>"
+          + "<link uid=\"S-1-5-21\" type=\"a-f-G-U\" relation=\"p-p\"/>"
+          + "<remarks source=\"BAO.F.WinTAK.S-1-5-21\" to=\"ONYX\""
+          + " time=\"2026-08-25T14:05:00.00Z\">helo landing zone</remarks></detail></event>";
+        check("Mode3 dm exact hex",
+                hex(HbcEncoder.encode(dmXml).bytes),
+                "50 5C 13 78 2A 40 56 19 5E A2 81 96 09 21 B1 26 66 89 1C 30 28");
+        HbcDecoder.Decoded dDm = HbcDecoder.decode(HbcEncoder.encode(dmXml).bytes);
+        check("Mode3 dm dest kind", String.valueOf(dDm.chatDestKind), "2");
+        check("Mode3 dm recipient", dDm.chatRecipient, "ONYX");
+        check("Mode3 dm text", dDm.chatText, "HELO LANDING ZONE");
+        check("Mode3 dm uid1", dDm.toXml().contains("uid1=\"HBC-ONYX\"") ? "yes" : "no", "yes");
 
         // --- Mode 4 Circle: exact bytes from README ---
         String circleXml =
@@ -152,6 +231,14 @@ public class HbcCodecTest {
         } else {
             System.out.println("PASS " + label);
         }
+    }
+
+    static String extractType(String xml) {
+        int i = xml.indexOf("type=\"");
+        if (i < 0) return "";
+        int start = i + 6;
+        int end = xml.indexOf('"', start);
+        return xml.substring(start, end);
     }
 
     static String hex(byte[] b) {

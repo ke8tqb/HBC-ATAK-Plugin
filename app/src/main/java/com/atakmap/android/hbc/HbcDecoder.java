@@ -9,13 +9,16 @@ import java.util.TimeZone;
 import java.util.UUID;
 
 /**
- * HBC Protocol v1.2 decoder — packed HBC bytes to reconstructed CoT XML.
- * Direct port of hbc_decoder.py (Modes 1-5), including the deterministic
+ * HBC Protocol v1.5 decoder — packed HBC bytes to reconstructed CoT XML.
+ * Direct port of hbc_decoder.py (Modes 1-6), including the deterministic
  * UID derivation rule (HBC-{CALLSIGN}, HBC-{ORIGINATOR}-911, etc.).
  */
 public final class HbcDecoder {
 
     public static final String UID_PREFIX = "HBC";
+
+    /** Mode 1 (v1.5) Affiliation code -> reconstructed atom type. */
+    private static final String[] AFFILIATION_TYPES = {"a-f-G", "a-h-G", "a-n-G", "a-u-G"};
 
     private HbcDecoder() {}
 
@@ -29,12 +32,16 @@ public final class HbcDecoder {
         // Mode 1
         public boolean isSpot;
         public String name = "";
+        public int affiliation = 3; // 0 Friendly, 1 Hostile, 2 Neutral, 3 Unknown
         // Mode 2
         public boolean alertActive = true;
         public String alertName = "";
         public String origName = "";
         // Mode 3
         public String chatText = "";
+        public int chatDestKind;         // 0 All Chat Rooms, 1 Named Room, 2 Direct Message
+        public String chatRoom = "";
+        public String chatRecipient = "";
         // Mode 4
         public int shapeKind;
         public int radiusM;
@@ -83,17 +90,16 @@ public final class HbcDecoder {
         // ------------------------------------------------------------------
         private String xmlMode1(Date now) {
             String uid;
-            String cotType;
+            String cotType = AFFILIATION_TYPES[
+                    (affiliation >= 0 && affiliation < AFFILIATION_TYPES.length) ? affiliation : 3];
             String how;
             Date stale;
             if (isSpot) {
                 uid = UUID.randomUUID().toString();
-                cotType = "a-u-G";
                 how = "h-g-i-g-o";
                 stale = new Date(now.getTime() + 365L * 24 * 3600 * 1000);
             } else {
                 uid = UID_PREFIX + "-" + callsign.toUpperCase();
-                cotType = "a-f-G";
                 how = "m-g";
                 stale = new Date(now.getTime() + 5L * 60 * 1000);
             }
@@ -141,20 +147,37 @@ public final class HbcDecoder {
         private String xmlMode3(Date now) {
             String msgId = UUID.randomUUID().toString();
             String senderUid = UID_PREFIX + "-" + callsign.toUpperCase();
-            String uid = "GeoChat." + senderUid + ".All Chat Rooms." + msgId;
+
+            String roomId, destUid, display, toAttr;
+            if (chatDestKind == 1) {                     // Named Room
+                roomId = chatRoom;
+                destUid = roomId;
+                display = roomId;
+                toAttr = roomId;
+            } else if (chatDestKind == 2) {               // Direct Message
+                display = chatRecipient.toUpperCase();
+                destUid = UID_PREFIX + "-" + display;
+                roomId = display;
+                toAttr = destUid;
+            } else {                                      // All Chat Rooms (default)
+                roomId = destUid = display = toAttr = "All Chat Rooms";
+            }
+
+            String uid = "GeoChat." + senderUid + "." + roomId + "." + msgId;
             Date stale = new Date(now.getTime() + 24L * 3600 * 1000);
             StringBuilder sb = new StringBuilder();
             eventOpen(sb, uid, "b-t-f", now, stale, "h-g-i-g-o");
             sb.append("  <point lat=\"0\" lon=\"0\" hae=\"9999999\" ce=\"9999999\" le=\"9999999\"/>\n");
             sb.append("  <detail>\n");
-            sb.append("    <__chat id=\"All Chat Rooms\" chatroom=\"All Chat Rooms\" senderCallsign=\"")
-              .append(esc(callsign)).append("\" groupOwner=\"false\" messageId=\"").append(msgId).append("\">\n");
-            sb.append("      <chatgrp id=\"All Chat Rooms\" uid0=\"").append(esc(senderUid))
-              .append("\" uid1=\"All Chat Rooms\"/>\n");
+            sb.append("    <__chat id=\"").append(esc(roomId)).append("\" chatroom=\"").append(esc(display))
+              .append("\" senderCallsign=\"").append(esc(callsign))
+              .append("\" groupOwner=\"false\" messageId=\"").append(msgId).append("\">\n");
+            sb.append("      <chatgrp id=\"").append(esc(roomId)).append("\" uid0=\"").append(esc(senderUid))
+              .append("\" uid1=\"").append(esc(destUid)).append("\"/>\n");
             sb.append("    </__chat>\n");
             sb.append("    <link uid=\"").append(esc(senderUid)).append("\" type=\"a-f-G-U\" relation=\"p-p\"/>\n");
             sb.append("    <remarks source=\"BAO.F.HBC.").append(esc(senderUid))
-              .append("\" to=\"All Chat Rooms\" time=\"").append(ts(now)).append("\">")
+              .append("\" to=\"").append(esc(toAttr)).append("\" time=\"").append(ts(now)).append("\">")
               .append(esc(chatText)).append("</remarks>\n");
             sb.append("  </detail>\n</event>");
             return sb.toString();
@@ -331,6 +354,7 @@ public final class HbcDecoder {
         switch (mode) {
             case 1: {
                 d.isSpot = r.readInt(1) == 1;
+                d.affiliation = r.readInt(2);
                 d.name = readName(r);
                 d.lat = r.readSigned(21) / 10000.0;
                 d.lon = r.readSigned(22) / 10000.0;
@@ -345,6 +369,14 @@ public final class HbcDecoder {
                 return d;
             }
             case 3: {
+                d.chatDestKind = r.readInt(2);
+                if (d.chatDestKind == 3)
+                    throw new IllegalArgumentException("Chat destination kind 11 is reserved");
+                if (d.chatDestKind == 1) {
+                    d.chatRoom = Ita2.decode(r);
+                } else if (d.chatDestKind == 2) {
+                    d.chatRecipient = Ita2.decode(r);
+                }
                 d.chatText = Ita2.decode(r);
                 return d;
             }

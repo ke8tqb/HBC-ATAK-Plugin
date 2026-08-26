@@ -4,6 +4,30 @@ All notable changes to HBC Audio Plugin are documented here.
 
 ---
 
+## [Unreleased] — protocol sync with HBC-Protocol v1.5
+
+Brings `HbcEncoder`/`HbcDecoder` up to date with the reference Python
+implementation. No UI or transport changes.
+
+**Protocol**
+- HBC v1.4: Mode 3 (GeoChat) gains a 2-bit destination-kind field —
+  All Chat Rooms (unchanged default), Named Room, or Direct Message.
+  Classified from `<__chat>`/`<chatgrp>`: no chatroom or "All Chat Rooms"
+  broadcasts as before; 3+ `uidN` members on `<chatgrp>` is a Named Room;
+  otherwise (exactly `uid0`+`uid1`) is a Direct Message, addressed by the
+  recipient's callsign and resolved to the same deterministic
+  `HBC-{CALLSIGN}` UID used elsewhere.
+- HBC v1.5: Mode 1 (PLI/Spot) gains a 2-bit Affiliation field (Friendly
+  `a-f-G` / Hostile `a-h-G` / Neutral `a-n-G` / Unknown `a-u-G`). Fixes a
+  bug where decode always reconstructed PLI as Friendly and Spot as
+  Unknown regardless of what was actually transmitted — confirmed against
+  a real ATAK capture that included hostile/neutral-affiliated markers.
+- Both changes are wire-incompatible with older Mode 1/Mode 3 frames from
+  this plugin; byte-for-byte cross-validated against the Python reference
+  implementation (`codec-test/HbcCodecTest.java`).
+
+---
+
 ## [0.9] — 2026-08-25 — dual-modem rework
 
 Ground-up rework of the audio layer and codec (version restarts at 0.9;

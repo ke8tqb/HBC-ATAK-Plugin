@@ -1,6 +1,10 @@
 # HBC Protocol Specification
 
-**Ham Binary Cursor on Target (HBC) v1.0**
+**Ham Binary Cursor on Target (HBC) v1.5**
+
+> This document covers Modes 1-3 in detail. For the full, authoritative
+> spec (all six modes, worked examples, and wire-format history) see the
+> reference implementation linked below.
 
 A compact binary encoding of ATAK Cursor on Target (CoT) messages designed
 for transmission over bandwidth-constrained amateur radio audio links.
@@ -117,12 +121,20 @@ CoT types: `a-f-G-*` (friendly), `a-h-G-*` (hostile), `a-n-G-*` (neutral),
 
 ```
 Bit     Field       Description
-[0]     PLI bit     0 = PLI (moving unit), 1 = Spot (placed marker)
-[3:1]   Name len    0–7 (number of ASCII characters that follow)
-[N]     Name        ASCII, 8 bits per character, N = name_len × 8
-[20:0]  Latitude    21-bit signed two's complement, units = degrees × 10,000
-[21:0]  Longitude   22-bit signed two's complement, units = degrees × 10,000
+[0]     PLI bit       0 = PLI (moving unit), 1 = Spot (placed marker)
+[2:1]   Affiliation   00 Friendly (a-f-G), 01 Hostile (a-h-G),
+                      10 Neutral (a-n-G), 11 Unknown (a-u-G, or any
+                      type with no atom affiliation prefix)
+[3:1]   Name len      0–7 (number of ASCII characters that follow)
+[N]     Name          ASCII, 8 bits per character, N = name_len × 8
+[20:0]  Latitude      21-bit signed two's complement, units = degrees × 10,000
+[21:0]  Longitude     22-bit signed two's complement, units = degrees × 10,000
 ```
+
+> **v1.5:** Affiliation was added because decode previously hardcoded PLI
+> as Friendly and Spot as Unknown regardless of what was transmitted —
+> silently mislabeling hostile/neutral units. This is a wire-incompatible
+> change from earlier plugin versions.
 
 ### Coordinate encoding
 
@@ -138,10 +150,17 @@ decoded = encoded_integer / 10,000.0
 
 ### Decoded CoT type
 
-| PLI bit | Decoded CoT type | ATAK marker |
-|---------|-----------------|-------------|
-| 0       | `a-f-G`         | Friendly ground track (teal diamond) |
-| 1       | `a-u-G`         | Unknown ground (yellow diamond) |
+The reconstructed type is `AFFILIATION_TYPES[affiliation]`, independent of
+the PLI/Spot bit (PLI in practice only ever encodes 0/1/2; Spot most often
+encodes 3, but can encode any value if the original marker had an atom
+affiliation prefix):
+
+| Affiliation | Decoded CoT type | ATAK marker |
+|-------------|-----------------|-------------|
+| 0 Friendly  | `a-f-G`         | Friendly ground track (teal diamond) |
+| 1 Hostile   | `a-h-G`         | Hostile ground track (red diamond) |
+| 2 Neutral   | `a-n-G`         | Neutral ground track (green square) |
+| 3 Unknown   | `a-u-G`         | Unknown ground (yellow diamond) |
 
 ### Name field limit
 
@@ -151,15 +170,16 @@ The receiving side displays what was transmitted.
 ### Worked example — KE8TQB at 40.621776°N, 83.204262°W
 
 ```
-Header:    KE8TQB (ITA2, 45 bits) + 000 (version) + 000 (mode) = 51 bits
-PLI bit:   0  (moving unit)
-Name len:  110  (6 chars)
-Name:      "KE8TQB" = 01001011 01000101 00111000 01010100 01010001 01000010  (48 bits)
-Latitude:  406218 → 001100011001011001010  (21 bits)
-Longitude: -832043 → 1100110100110111010101  (22 bits)
+Header:      KE8TQB (ITA2, 45 bits) + 000 (version) + 000 (mode) = 51 bits
+PLI bit:     0  (moving unit)
+Affiliation: 00  (Friendly — type is a-f-G-U-C)
+Name len:    110  (6 chars)
+Name:        "KE8TQB" = 01001011 01000101 00111000 01010100 01010001 01000010  (48 bits)
+Latitude:    406218 → 001100011001011001010  (21 bits)
+Longitude:   -832043 → 1100110100110111010101  (22 bits)
 
-Total: 51 + 1 + 3 + 48 + 21 + 22 = 146 bits → 19 bytes
-Hex:  78 76 6F C2 F9 40 0C 96 8A 70 A8 A2 84 63 2C AC D3 75 40
+Total: 51 + 1 + 2 + 3 + 48 + 21 + 22 = 148 bits → 19 bytes
+Hex:  78 76 6F C2 F9 40 03 25 A2 9C 2A 28 A1 18 CB 2B 34 DD 50
 ```
 
 ---
@@ -176,6 +196,40 @@ Used for 911 / emergency alerts. CoT type: `b-a-o-tbl`.
 [20:0]  Latitude           21-bit signed
 [21:0]  Longitude          22-bit signed
 ```
+
+---
+
+## Mode 3 — GeoChat
+
+Used for chat messages. CoT type: `b-t-f`.
+
+```
+[1:0]   Destination Kind   2 bits: 00 All Chat Rooms, 01 Named Room,
+                           10 Direct Message, 11 reserved
+Named Room:
+  [N]   Room Name          ITA2, CR-terminated (free text)
+Direct Message:
+  [N]   Recipient          ITA2, CR-terminated (max 8 chars, same
+                           alphabet as the header callsign)
+[N]     Message            ITA2, CR-terminated, uppercase only
+```
+
+Classification on encode, from `<__chat>`/`<chatgrp>`:
+
+| Condition | Destination Kind |
+|-----------|-----------------|
+| No chatroom, or chatroom = "All Chat Rooms" | All Chat Rooms |
+| `<chatgrp>` has 3+ `uidN` attributes | Named Room (chatroom name transmitted) |
+| Otherwise (exactly `uid0` + `uid1`) | Direct Message (chatroom name — ATAK's 1:1 chat tab label — transmitted as the recipient) |
+
+A Direct Message recipient resolves to `HBC-{RECIPIENT}` on decode, the
+same deterministic UID a PLI report from that station would produce, so a
+DM correlates with an existing contact automatically. A Named Room uses
+the literal room name as its own UID, matching the "All Chat Rooms"
+convention.
+
+> **v1.4:** this is a wire-incompatible change from earlier plugin
+> versions, which only ever encoded/decoded the All Chat Rooms case.
 
 ---
 
