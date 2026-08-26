@@ -146,14 +146,34 @@ public class HbcCodecTest {
           + "<link uid=\"S-1-5-21\" type=\"a-f-G-U\" relation=\"p-p\"/>"
           + "<remarks source=\"BAO.F.WinTAK.S-1-5-21\" to=\"ONYX\""
           + " time=\"2026-08-25T14:05:00.00Z\">helo landing zone</remarks></detail></event>";
+        // v1.6: DM carries a 16-bit message tag (CRC-16 of __chat/@messageId)
         check("Mode3 dm exact hex",
                 hex(HbcEncoder.encode(dmXml).bytes),
-                "50 5C 13 78 2A 40 56 19 5E A2 81 96 09 21 B1 26 66 89 1C 30 28");
+                "50 5C 13 78 2A 40 56 19 5E A1 16 0E 81 96 09 21 B1 26 66 89 1C 30 28");
         HbcDecoder.Decoded dDm = HbcDecoder.decode(HbcEncoder.encode(dmXml).bytes);
         check("Mode3 dm dest kind", String.valueOf(dDm.chatDestKind), "2");
         check("Mode3 dm recipient", dDm.chatRecipient, "ONYX");
         check("Mode3 dm text", dDm.chatText, "HELO LANDING ZONE");
+        check("Mode3 dm tag", String.format("%04X", dDm.chatMsgTag), "4583");
         check("Mode3 dm uid1", dDm.toXml().contains("uid1=\"HBC-ONYX\"") ? "yes" : "no", "yes");
+
+        // v1.6: Mode 0 ack round trip (delivered + read), exact reference bytes
+        HbcEncoder.Encoded ackD = HbcEncoder.encodeAck("ONYX", "RECEIVER",
+                HbcEncoder.ACK_DELIVERED, dDm.chatMsgTag);
+        check("Mode0 ack mode", String.valueOf(ackD.mode), "0");
+        HbcDecoder.Decoded adD = HbcDecoder.decode(ackD.bytes);
+        check("Mode0 ack rx mode", String.valueOf(adD.mode), "0");
+        check("Mode0 ack kind", String.valueOf(adD.ackKind), "0");
+        check("Mode0 ack recipient", adD.ackRecipient, "RECEIVER");
+        check("Mode0 ack tag", String.format("%04X", adD.chatMsgTag), "4583");
+        adD.ackMessageId = "e0295a69-0000-0000-0000-000000000000";
+        check("Mode0 receipt uid", adD.toXml().contains(
+                "uid=\"e0295a69-0000-0000-0000-000000000000\"") ? "y" : "n", "y");
+        check("Mode0 receipt type", adD.toXml().contains("type=\"b-t-f-d\"") ? "y" : "n", "y");
+        HbcDecoder.Decoded adR = HbcDecoder.decode(HbcEncoder.encodeAck(
+                "ONYX", "RECEIVER", HbcEncoder.ACK_READ, dDm.chatMsgTag).bytes);
+        check("Mode0 read kind", String.valueOf(adR.ackKind), "1");
+        check("Mode0 read receipt type", adR.toXml().contains("type=\"b-t-f-r\"") ? "y" : "n", "y");
 
         // --- Mode 4 Circle: exact bytes from README ---
         String circleXml =

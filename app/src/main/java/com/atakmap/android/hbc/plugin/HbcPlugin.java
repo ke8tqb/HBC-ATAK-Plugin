@@ -88,6 +88,29 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
     private final Map<String, Long> recentTx = new LinkedHashMap<>();
     private final Map<Integer, Long> recentRx = new HashMap<>();
 
+    // v1.6 DM delivery/read receipts:
+    //  - sender side: DM tag -> the original ATAK messageId (to resolve
+    //    incoming Mode 0 acks back into b-t-f-d / b-t-f-r receipt CoTs)
+    //  - receiver side: injected messageId -> {tag, sender callsign} (to
+    //    convert ATAK's automatic receipts into Mode 0 acks)
+    private final Map<Integer, String> sentDmMessageIds = new LinkedHashMap<>();
+    private static final class PendingAck {
+        final int tag; final String senderCallsign;
+        PendingAck(int tag, String senderCallsign) {
+            this.tag = tag; this.senderCallsign = senderCallsign;
+        }
+    }
+    private final Map<String, PendingAck> rxDmAcks = new LinkedHashMap<>();
+    private static final int MAX_ACK_MAP = 200;
+
+    private static <K, V> void capSize(Map<K, V> map) {
+        Iterator<? extends Map.Entry<K, V>> it = map.entrySet().iterator();
+        while (map.size() > MAX_ACK_MAP && it.hasNext()) {
+            it.next();
+            it.remove();
+        }
+    }
+
     public HbcPlugin(IServiceController serviceController) {
         this.serviceController = serviceController;
         final PluginContextProvider ctxProvider =
@@ -355,6 +378,31 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
         try {
             String type = event.getType();
             log("TX candidate: " + type + " uid " + event.getUID());
+
+            // v1.6: ATAK's automatic chat receipts for an HBC-delivered DM.
+            // The receipt's UID equals the messageId of the message being
+            // acknowledged; convert it into a compact Mode 0 ack frame.
+            if (type.equals("b-t-f-d") || type.equals("b-t-f-r")) {
+                PendingAck pa = rxDmAcks.get(event.getUID());
+                if (pa != null) {
+                    int kind = type.equals("b-t-f-r")
+                            ? HbcEncoder.ACK_READ : HbcEncoder.ACK_DELIVERED;
+                    HbcEncoder.Encoded ack = HbcEncoder.encodeAck(
+                            prefs.getString("callsign", ""),
+                            pa.senderCallsign, kind, pa.tag);
+                    if (ofdm != null)
+                        ofdm.transmit(prefs.getString("callsign", ""), ack.bytes);
+                    else
+                        modem.transmit(prefs.getString("dest", DEFAULT_DEST),
+                                prefs.getString("callsign", ""),
+                                parsePath(prefs.getString("path", "")), ack.bytes);
+                    log("Queued TX mode 0 ack (" + type + ") -> "
+                            + pa.senderCallsign + " tag 0x"
+                            + String.format("%04X", pa.tag));
+                }
+                return;   // receipts are never encoded as normal messages
+            }
+
             if (!modeEnabled(type)) {
                 log("TX skip: type " + type + " disabled in settings");
                 return;
@@ -392,6 +440,13 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
             else
                 modem.transmit(dest, myCall, path, enc.bytes);
             log("Queued TX mode " + enc.mode + " (" + enc.bytes.length + " B) " + type);
+
+            // v1.6: remember outgoing DM tags so incoming Mode 0 acks can be
+            // mapped back to the original messageId (delivered/read checkmark).
+            if (enc.mode == 3 && enc.chatMsgTag >= 0 && !enc.chatMessageId.isEmpty()) {
+                sentDmMessageIds.put(enc.chatMsgTag, enc.chatMessageId);
+                capSize(sentDmMessageIds);
+            }
         } catch (HbcEncoder.HbcEncodeException e) {
             log("TX skip: " + e.getMessage());
         } catch (Exception e) {
@@ -479,6 +534,10 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
                     return;
             } catch (Exception ignored) {}
 
+            if (dec.mode == 0) {
+                handleAckRx(dec);
+                return;
+            }
             if (!resolveDirectMessage(dec))
                 return;
 
@@ -489,6 +548,7 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
                 return;
             }
             CotMapComponent.getInternalDispatcher().dispatch(event);
+            registerIncomingDm(dec);
             log("RX " + p.source + ">" + p.destination + " " + dec.summary());
             logDecode(p.source + " > " + p.destination
                     + (p.path != null && p.path.length > 0
@@ -537,6 +597,10 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
                     return;
             } catch (Exception ignored) {}
 
+            if (dec.mode == 0) {
+                handleAckRx(dec);
+                return;
+            }
             if (!resolveDirectMessage(dec))
                 return;
 
@@ -547,6 +611,7 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
                 return;
             }
             CotMapComponent.getInternalDispatcher().dispatch(event);
+            registerIncomingDm(dec);
             log("RX OFDM " + callsign + " " + dec.summary());
             logDecode(callsign + " (OFDM)"
                     + "\n  " + dec.summary()
@@ -554,6 +619,58 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
         } catch (Exception e) {
             Log.d(TAG, "OFDM payload not HBC: " + e.getMessage());
         }
+    }
+
+    /**
+     * After a DM addressed to this station has been injected, remember its
+     * injected messageId so ATAK's automatic b-t-f-d/b-t-f-r receipts for it
+     * can be converted into Mode 0 acks back to the sender (v1.6).
+     */
+    private void registerIncomingDm(HbcDecoder.Decoded dec) {
+        if (dec.mode == 3 && dec.chatDestKind == 2
+                && !dec.chatInjectedMessageId.isEmpty()) {
+            rxDmAcks.put(dec.chatInjectedMessageId,
+                    new PendingAck(dec.chatMsgTag, dec.callsign));
+            capSize(rxDmAcks);
+        }
+    }
+
+    /**
+     * Mode 0 Ack received (v1.6): if addressed to this station, map the
+     * 16-bit tag back to the original outgoing DM's messageId and inject a
+     * b-t-f-d/b-t-f-r receipt CoT so ATAK shows the delivered/read checkmark.
+     */
+    private void handleAckRx(HbcDecoder.Decoded dec) {
+        String myCall = prefs.getString("callsign", "");
+        String atakCallsign = null;
+        try {
+            com.atakmap.android.maps.MapView mv =
+                    com.atakmap.android.maps.MapView.getMapView();
+            if (mv != null) atakCallsign = mv.getDeviceCallsign();
+        } catch (Exception ignored) {}
+        boolean forUs = dec.ackRecipient.equalsIgnoreCase(myCall)
+                || (atakCallsign != null && dec.ackRecipient.equalsIgnoreCase(atakCallsign));
+        if (!forUs) {
+            log("RX ack for '" + dec.ackRecipient + "' — not this station, ignored");
+            return;
+        }
+        String messageId = sentDmMessageIds.get(dec.chatMsgTag);
+        if (messageId == null) {
+            log("RX ack tag 0x" + String.format("%04X", dec.chatMsgTag)
+                    + " — no matching sent DM, ignored");
+            return;
+        }
+        dec.ackMessageId = messageId;
+        String xml = dec.toXml();
+        CotEvent event = CotEvent.parse(xml);
+        if (event == null || !event.isValid()) {
+            log("RX ack produced invalid CoT (" + dec.summary() + ")");
+            return;
+        }
+        CotMapComponent.getInternalDispatcher().dispatch(event);
+        log("RX " + dec.summary() + " -> receipt injected");
+        logDecode(dec.callsign + " ack " + (dec.ackKind == 1 ? "READ" : "DELIVERED")
+                + "\n  msg " + messageId);
     }
 
     /**

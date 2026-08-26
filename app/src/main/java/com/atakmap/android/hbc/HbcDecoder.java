@@ -47,6 +47,20 @@ public final class HbcDecoder {
          *  message into the chat window when chatgrp/uid1 equals the local
          *  device UID, so the derived HBC-{CALLSIGN} UID is not enough. */
         public String chatRecipientUidOverride = null;
+        /** Mode 3 DM (v1.6): 16-bit message tag echoed in Mode 0 acks. */
+        public int chatMsgTag;
+        /** Set by xmlMode3(): the fresh messageId the injected DM was given,
+         *  so the plugin can map it back to the tag when ATAK emits its
+         *  automatic b-t-f-d/b-t-f-r receipt for that message. */
+        public String chatInjectedMessageId = "";
+
+        // Mode 0 — Ack (v1.6)
+        public int ackKind;              // 0 delivered (b-t-f-d), 1 read (b-t-f-r)
+        public String ackRecipient = ""; // original DM sender this ack targets
+        /** Set by the receiving plugin before toXml(): the original ATAK
+         *  messageId the tag maps to. ATAK matches receipts to chat messages
+         *  purely by the receipt event's UID == messageId. */
+        public String ackMessageId = "";
         // Mode 4
         public int shapeKind;
         public int radiusM;
@@ -65,6 +79,9 @@ public final class HbcDecoder {
 
         public String summary() {
             switch (mode) {
+                case 0: return "Mode 0 Ack(" + (ackKind == 1 ? "READ" : "DELIVERED")
+                        + ") " + callsign + " -> " + ackRecipient
+                        + " tag 0x" + String.format("%04X", chatMsgTag);
                 case 1: return "Mode 1 " + (isSpot ? "Spot" : "PLI") + " " + callsign
                         + " '" + name + "' @ " + fmt6(lat) + "," + fmt6(lon);
                 case 2: return "Mode 2 Alert(" + (alertActive ? "ACTIVE" : "CANCEL") + ") "
@@ -81,6 +98,7 @@ public final class HbcDecoder {
         public String toXml() {
             Date now = new Date();
             switch (mode) {
+                case 0: return xmlMode0(now);
                 case 1: return xmlMode1(now);
                 case 2: return xmlMode2(now);
                 case 3: return xmlMode3(now);
@@ -93,6 +111,24 @@ public final class HbcDecoder {
         }
 
         // ------------------------------------------------------------------
+        private String xmlMode0(Date now) {
+            // ATAK matches chat receipts by the receipt event's UID, which
+            // must equal the original message's messageId (set ackMessageId
+            // from the sender-side tag map before calling toXml()).
+            String cotType = ackKind == 1 ? "b-t-f-r" : "b-t-f-d";
+            String uid = ackMessageId.isEmpty()
+                    ? String.format("HBC-ACK-%04X", chatMsgTag) : ackMessageId;
+            Date stale = new Date(now.getTime() + 5L * 60 * 1000);
+            StringBuilder sb = new StringBuilder();
+            eventOpen(sb, uid, cotType, now, stale, "h-g-i-g-o");
+            sb.append("  <point lat=\"0\" lon=\"0\" hae=\"9999999\" ce=\"9999999\" le=\"9999999\"/>\n");
+            sb.append("  <detail>\n");
+            sb.append("    <__chatreceipt ackedUid=\"").append(esc(uid))
+              .append("\" senderCallsign=\"").append(esc(callsign)).append("\"/>\n");
+            sb.append("  </detail>\n</event>");
+            return sb.toString();
+        }
+
         private String xmlMode1(Date now) {
             String uid;
             String cotType = AFFILIATION_TYPES[
@@ -151,6 +187,7 @@ public final class HbcDecoder {
 
         private String xmlMode3(Date now) {
             String msgId = UUID.randomUUID().toString();
+            chatInjectedMessageId = msgId;
             String senderUid = UID_PREFIX + "-" + callsign.toUpperCase();
 
             String roomId, destUid, display, toAttr;
@@ -357,6 +394,7 @@ public final class HbcDecoder {
         String callsign = Ita2.decode(r);
         int version = r.readInt(3) + 1;
         int mode    = r.readInt(3) + 1;
+        if (mode == 8) mode = 0;   // wire bits 111 = Mode 0 Ack (v1.6)
 
         Decoded d = new Decoded();
         d.callsign = callsign;
@@ -388,8 +426,18 @@ public final class HbcDecoder {
                     d.chatRoom = Ita2.decode(r);
                 } else if (d.chatDestKind == 2) {
                     d.chatRecipient = Ita2.decode(r);
+                    d.chatMsgTag = r.readInt(16);   // v1.6 message tag
                 }
                 d.chatText = Ita2.decode(r);
+                return d;
+            }
+            case 0: {
+                // Ack (v1.6): recipient callsign + kind (2b) + tag (16b)
+                d.ackRecipient = Ita2.decode(r);
+                d.ackKind = r.readInt(2);
+                if (d.ackKind > 1)
+                    throw new IllegalArgumentException("Ack kind " + d.ackKind + " is reserved");
+                d.chatMsgTag = r.readInt(16);
                 return d;
             }
             case 4: {

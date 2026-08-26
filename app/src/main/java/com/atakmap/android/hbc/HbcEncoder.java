@@ -48,6 +48,22 @@ public final class HbcEncoder {
     private static final int CHAT_DEST_ROOM = 1;
     private static final int CHAT_DEST_DM   = 2;
 
+    /** Mode 0 (v1.6) ack kinds. */
+    public static final int ACK_DELIVERED = 0;   // b-t-f-d
+    public static final int ACK_READ      = 1;   // b-t-f-r
+
+    /** CRC-16/CCITT-FALSE (poly 0x1021, init 0xFFFF) — the DM message tag. */
+    public static int crc16(byte[] data) {
+        int crc = 0xFFFF;
+        for (byte b : data) {
+            crc ^= (b & 0xFF) << 8;
+            for (int i = 0; i < 8; i++)
+                crc = ((crc & 0x8000) != 0) ? ((crc << 1) ^ 0x1021) & 0xFFFF
+                                            : (crc << 1) & 0xFFFF;
+        }
+        return crc;
+    }
+
     /** Mode 6 type-token charset: index into 0-9 (0-9), A-Z (10-35), a-z (36-61). */
     static final String TOKEN_CHARSET =
             "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
@@ -76,6 +92,11 @@ public final class HbcEncoder {
         public final int mode;
         public final String callsign;
         public final String cotType;
+        /** Mode 3 DM only (v1.6): the 16-bit tag transmitted with the DM,
+         *  and the ATAK messageId it hashes — the sender plugin maps
+         *  tag -> messageId so incoming Mode 0 acks can be resolved. */
+        public int chatMsgTag = -1;
+        public String chatMessageId = "";
 
         Encoded(byte[] bytes, int mode, String callsign, String cotType) {
             this.bytes = bytes;
@@ -164,7 +185,9 @@ public final class HbcEncoder {
             throw new HbcEncodeException(e.getMessage());
         }
         w.bits(0, 3);          // version 1 -> 000
-        w.bits(mode - 1, 3);   // mode
+        // Mode 0 (Ack, v1.6) rides the previously reserved bit pattern 111;
+        // all other modes encode as (mode number - 1).
+        w.bits(mode == 0 ? 7 : mode - 1, 3);
         return w;
     }
 
@@ -243,7 +266,7 @@ public final class HbcEncoder {
     // Mode 3 — GeoChat
     // ------------------------------------------------------------------
     private static Encoded mode3(String cotType, Element detail) throws HbcEncodeException {
-        String sender = "", message = "", chatroom = "";
+        String sender = "", message = "", chatroom = "", messageId = "";
         int destKind = CHAT_DEST_ALL;
         String chatRoom = "", chatRecipient = "";
         if (detail != null) {
@@ -252,6 +275,7 @@ public final class HbcEncoder {
                 sender = attr(chat, "senderCallsign");
                 chatroom = attr(chat, "chatroom");
                 if (chatroom.isEmpty()) chatroom = attr(chat, "id");
+                messageId = attr(chat, "messageId");
                 Element chatgrp = child(chat, "chatgrp");
                 int memberCount = 0;
                 if (chatgrp != null) {
@@ -276,17 +300,49 @@ public final class HbcEncoder {
         }
         BitWriter w = header(sender, 3);
         w.bits(destKind, 2);
+        int msgTag = -1;
         try {
             if (destKind == CHAT_DEST_ROOM) {
                 w.raw(Ita2.encodeText(chatRoom));
             } else if (destKind == CHAT_DEST_DM) {
                 w.raw(Ita2.encodeCallsign(chatRecipient, MAX_CS_CHARS));
+                // v1.6: 16-bit message tag (CRC-16 of the ATAK messageId),
+                // echoed back in Mode 0 acks for the delivered/read checkmark.
+                msgTag = messageId.isEmpty() ? 0
+                        : crc16(messageId.getBytes(StandardCharsets.UTF_8));
+                w.bits(msgTag, 16);
             }
         } catch (IllegalArgumentException e) {
             throw new HbcEncodeException(e.getMessage());
         }
         w.raw(Ita2.encodeText(message));
-        return new Encoded(w.toBytes(), 3, sender, cotType);
+        Encoded enc = new Encoded(w.toBytes(), 3, sender, cotType);
+        enc.chatMsgTag = msgTag;
+        enc.chatMessageId = messageId;
+        return enc;
+    }
+
+    /**
+     * Mode 0 — Ack (v1.6, wire mode bits 111): delivery/read receipt for a
+     * Direct Message.  Payload: recipient callsign (ITA2, CR-terminated,
+     * the original DM sender) + ack kind (2 bits) + echoed 16-bit tag.
+     */
+    public static Encoded encodeAck(String callsign, String recipient,
+                                    int kind, int msgTag) throws HbcEncodeException {
+        if (kind != ACK_DELIVERED && kind != ACK_READ)
+            throw new HbcEncodeException("Invalid ack kind " + kind);
+        BitWriter w = header(callsign, 0);
+        try {
+            w.raw(Ita2.encodeCallsign(recipient, MAX_CS_CHARS));
+        } catch (IllegalArgumentException e) {
+            throw new HbcEncodeException(e.getMessage());
+        }
+        w.bits(kind, 2);
+        w.bits(msgTag & 0xFFFF, 16);
+        Encoded enc = new Encoded(w.toBytes(), 0, callsign,
+                kind == ACK_READ ? "b-t-f-r" : "b-t-f-d");
+        enc.chatMsgTag = msgTag & 0xFFFF;
+        return enc;
     }
 
     // ------------------------------------------------------------------
