@@ -172,8 +172,12 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
      * Toolbar radio icon reflecting the radio-link state: electric green
      * while the audio modem is running, gray when stopped. Follows the same
      * `started` flag as the Start/Stop Radio Link button, so the two can
-     * never disagree. Tap opens the plugin pane; press-and-hold toggles the
-     * radio link on/off.
+     * never disagree.
+     *
+     * Tap toggles the modem on/off (the plugin pane stays reachable via
+     * the main HBC toolbar icon). ATAK core consumes long-presses to show
+     * the item tooltip, so the tooltip title carries the modem state
+     * ("HBC Radio: RUNNING/STOPPED") instead of a long-press action.
      *
      * ToolbarItems are immutable, so the item is rebuilt on state change —
      * a fixed identifier keeps ATAK treating it as the same tool, so a
@@ -188,8 +192,11 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
         try {
             if (radioStatusItem != null)
                 uiService.removeToolbarItem(radioStatusItem);
+            String title = pluginContext.getString(started
+                    ? R.string.hbc_radio_status_on
+                    : R.string.hbc_radio_status_off);
             radioStatusItem = new ToolbarItem.Builder(
-                    pluginContext.getString(R.string.hbc_radio_status_label),
+                    title,
                     MarshalManager.marshal(renderRadioIcon(),
                             android.graphics.drawable.Drawable.class,
                             gov.tak.api.commons.graphics.Bitmap.class))
@@ -197,11 +204,7 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
                     .setListener(new ToolbarItemAdapter() {
                         @Override
                         public void onClick(ToolbarItem item) {
-                            showPane();   // tap opens the plugin pane
-                        }
-                        @Override
-                        public void onLongClick(ToolbarItem item) {
-                            toggleRadioFromIcon();   // hold toggles the modem
+                            toggleRadioFromIcon();   // tap toggles the modem
                         }
                     })
                     .build();
@@ -226,7 +229,7 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
                 pluginContext.getResources(), bmp);
     }
 
-    /** Press-and-hold on the toolbar radio icon: start/stop the modem. */
+    /** Tap on the toolbar radio icon: start/stop the modem. */
     private void toggleRadioFromIcon() {
         if (started) {
             stopRadio();

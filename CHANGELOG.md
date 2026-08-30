@@ -4,6 +4,17 @@ All notable changes to HBC Audio Plugin are documented here.
 
 ---
 
+## [0.15] — Radio icon: tap toggles the modem
+
+- ATAK core consumes toolbar long-presses to show the item tooltip, so
+  the 0.14 press-and-hold toggle could never fire. A single tap on the
+  radio icon now starts/stops the audio modem (with toast feedback);
+  the plugin pane remains reachable via the main HBC toolbar icon.
+- The tooltip shown on long-press is now state-aware: "HBC Radio:
+  RUNNING (tap to stop)" / "HBC Radio: STOPPED (tap to start)".
+
+---
+
 ## [0.14] — Radio icon fixes; PLI doubles as mesh announce
 
 - The "Announce min" setting is removed: your own transmissions (PLI
