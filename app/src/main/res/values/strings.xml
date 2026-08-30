@@ -10,6 +10,7 @@
     <string name="hbc_radio_status_on">HBC Radio: RUNNING (tap to stop)</string>
     <string name="hbc_radio_status_off">HBC Radio: STOPPED (tap to start)</string>
     <string name="hbc_stopped">STOPPED</string>
+    <string name="hbc_pli_countdown_idle">Next PLI: —</string>
     <string name="hbc_callsign_label">Ham Callsign (FCC ID, max 8 chars)</string>
     <string name="hbc_callsign_hint">e.g. KE8TQB</string>
     <string name="hbc_send_to_label">Send to (mesh destination for markers/points)</string>

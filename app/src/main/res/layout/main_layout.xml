@@ -49,7 +49,14 @@
                 android:id="@+id/hbc_status"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="@string/hbc_stopped"
+                android:text="@string/hbc_stopped" />
+
+            <TextView
+                android:id="@+id/hbc_pli_countdown"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/hbc_pli_countdown_idle"
+                android:textSize="12sp"
                 android:paddingBottom="6dp" />
 
             <TextView

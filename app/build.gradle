@@ -8,7 +8,7 @@
 
 buildscript {
 
-    ext.PLUGIN_VERSION = "0.16"
+    ext.PLUGIN_VERSION = "0.17"
     // Must exactly match the host ATAK's declared plugin-api. ATAK-CIV
     // 5.5.1.x declares "com.atakmap.app@5.5.1.CIV" (the third digit is the
     // API level; the fourth is a patch that shares the same API).

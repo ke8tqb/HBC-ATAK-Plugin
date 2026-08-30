@@ -85,7 +85,8 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
     private CheckBox cbTxEnable, cbRxEnable, cbSelfPli, cbChat, cbAlerts, cbShapes,
             cbCasevac, cbSpots;
     private Button btnStartStop;
-    private TextView tvStatus, tvLog;
+    private TextView tvStatus, tvLog, tvPliCountdown;
+    private boolean pliTickerRunning = false;
     private View tabSettings, tabDecodes;
     private Button btnTabSettings, btnTabDecodes, btnDecodesClear;
     private TextView tvDecodes, tvDecodesCount;
@@ -298,8 +299,10 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
         cbCasevac   = v.findViewById(R.id.hbc_mode_casevac);
         btnStartStop = v.findViewById(R.id.hbc_start_stop);
         tvStatus    = v.findViewById(R.id.hbc_status);
+        tvPliCountdown = v.findViewById(R.id.hbc_pli_countdown);
         tvLog       = v.findViewById(R.id.hbc_log);
         tvLog.setMovementMethod(new ScrollingMovementMethod());
+        startPliTicker();
 
         // tabs
         tabSettings    = v.findViewById(R.id.hbc_tab_settings);
@@ -375,6 +378,48 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
         spSendTo.setAdapter(adapter);
         int idx = saved.isEmpty() ? 0 : items.indexOf(saved);
         spSendTo.setSelection(Math.max(0, idx));
+    }
+
+    /**
+     * Once-a-second UI ticker showing when the next self-PLI broadcast can
+     * go out, based on the user's "PLI min s" rate limit and the time of
+     * the last PLI actually transmitted. ATAK originates the PLI events;
+     * the plugin transmits the first one that arrives after the countdown
+     * reaches zero.
+     */
+    private void startPliTicker() {
+        if (pliTickerRunning) return;
+        pliTickerRunning = true;
+        mainHandler.post(new Runnable() {
+            @Override
+            public void run() {
+                updatePliCountdown();
+                mainHandler.postDelayed(this, 1000);
+            }
+        });
+    }
+
+    private void updatePliCountdown() {
+        if (tvPliCountdown == null) return;
+        String text;
+        if (!started) {
+            text = "Next PLI: \u2014 (radio off)";
+        } else if (!prefs.getBoolean("tx_enable", true)
+                || !prefs.getBoolean("mode_pli", true)) {
+            text = "Next PLI: disabled";
+        } else {
+            long rateMs = prefs.getInt("pli_rate_s", 60) * 1000L;
+            long remain = lastPliTxMs == 0 ? 0
+                    : lastPliTxMs + rateMs - System.currentTimeMillis();
+            if (remain <= 0) {
+                text = "Next PLI: ready (waiting for ATAK position update)";
+            } else {
+                long s = (remain + 999) / 1000;
+                text = String.format(Locale.US, "Next PLI: in %d:%02d",
+                        s / 60, s % 60);
+            }
+        }
+        tvPliCountdown.setText(text);
     }
 
     private void selectTab(boolean decodes) {

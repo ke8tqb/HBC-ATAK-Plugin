@@ -4,6 +4,17 @@ All notable changes to HBC Audio Plugin are documented here.
 
 ---
 
+## [0.17] — PLI countdown in the settings pane
+
+- New live "Next PLI" line under the status text: counts down (m:ss,
+  updated every second) until the next self-PLI broadcast is allowed,
+  based on the user's "PLI min s" rate limit and the last PLI actually
+  transmitted. Shows "ready (waiting for ATAK position update)" when the
+  rate limit has elapsed, "disabled" when PLI or TX is off, and "—
+  (radio off)" when the modem is stopped.
+
+---
+
 ## [0.16] — Backlit radio icon when modem is on
 
 - When the audio modem is running, the toolbar radio icon now sits on a
