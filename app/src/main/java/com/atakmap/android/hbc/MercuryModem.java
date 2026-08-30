@@ -57,6 +57,7 @@ public class MercuryModem {
 
     private final Deque<TxItem> txQueue = new ArrayDeque<>();
     private final Object txLock = new Object();
+    private final CsmaSense csma = new CsmaSense();
 
     public MercuryModem(Context context, OfdmModem.PayloadListener listener) {
         this(context, listener, MercuryNative.MODE_DATAC4);
@@ -214,6 +215,17 @@ public class MercuryModem {
             }
             if (item == null) continue;
 
+            // CSMA: energy carrier-sense with random backoff. HF bursts are
+            // long, so allow a longer wait before giving up.
+            try {
+                if (csma.isBusy())
+                    listener.onStatus("CSMA: channel busy \u2014 deferring TX");
+                if (!csma.waitForClear(15000, null))
+                    listener.onStatus("CSMA: channel busy > 15 s \u2014 transmitting anyway");
+            } catch (InterruptedException e) {
+                return;
+            }
+
             transmitting = true;
             AudioTrack track = null;
             try {
@@ -334,6 +346,7 @@ public class MercuryModem {
                 }
                 if (got < nin) continue;
                 if (transmitting) continue; // half duplex: discard our own audio
+                csma.feed(pcm, nin);        // CSMA carrier sense
 
                 int nbytes;
                 synchronized (MercuryNative.class) {

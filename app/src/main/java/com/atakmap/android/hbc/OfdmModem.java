@@ -64,6 +64,7 @@ public class OfdmModem {
 
     private final Deque<TxItem> txQueue = new ArrayDeque<>();
     private final Object txLock = new Object();
+    private final CsmaSense csma = new CsmaSense();
 
     public OfdmModem(Context context, PayloadListener listener) {
         this.context = context;
@@ -237,6 +238,16 @@ public class OfdmModem {
             }
             if (item == null) continue;
 
+            // CSMA: energy carrier-sense with random backoff
+            try {
+                if (csma.isBusy())
+                    listener.onStatus("CSMA: channel busy \u2014 deferring TX");
+                if (!csma.waitForClear(8000, null))
+                    listener.onStatus("CSMA: channel busy > 8 s \u2014 transmitting anyway");
+            } catch (InterruptedException e) {
+                return;
+            }
+
             transmitting = true;
             AudioTrack track = null;
             try {
@@ -335,6 +346,7 @@ public class OfdmModem {
                 int n = record.read(pcm, 0, pcm.length);
                 if (n <= 0) continue;
                 if (transmitting) continue; // half duplex
+                csma.feed(pcm, n);          // CSMA carrier sense
 
                 boolean ready;
                 synchronized (OfdmNative.class) {

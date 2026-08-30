@@ -70,6 +70,7 @@ public class AudioModem {
 
     private final Deque<Packet> txQueue = new ArrayDeque<>();
     private final Object txLock = new Object();
+    private final CsmaSense csma = new CsmaSense();
 
     public AudioModem(Context context, FrameListener listener) {
         this.context = context;
@@ -261,10 +262,14 @@ public class AudioModem {
             }
             if (packet == null) continue;
 
-            // simple CSMA: wait for a quiet channel (max 5 s)
-            long csmaDeadline = System.currentTimeMillis() + 5000;
-            while (isChannelBusy() && System.currentTimeMillis() < csmaDeadline) {
-                try { Thread.sleep(100); } catch (InterruptedException e) { return; }
+            // CSMA: energy carrier-sense + demodulator DCD, random backoff
+            try {
+                if (csma.isBusy() || isChannelBusy())
+                    listener.onStatus("CSMA: channel busy \u2014 deferring TX");
+                if (!csma.waitForClear(8000, this::isChannelBusy))
+                    listener.onStatus("CSMA: channel busy > 8 s \u2014 transmitting anyway");
+            } catch (InterruptedException e) {
+                return;
             }
 
             transmitting = true;
@@ -379,6 +384,7 @@ public class AudioModem {
                 int n = record.read(pcm, 0, pcm.length);
                 if (n <= 0) continue;
                 if (transmitting) continue; // half duplex: ignore our own audio
+                csma.feed(pcm, n);          // CSMA carrier sense
                 for (int i = 0; i < n; i++)
                     samples[i] = pcm[i] / 32768.0f;
                 demodulator.addSamples(samples, n);

@@ -4,7 +4,22 @@ All notable changes to HBC Audio Plugin are documented here.
 
 ---
 
-## [Unreleased] — Mercury HF modem + protocol sync with HBC-Protocol v1.6
+## [0.10] — Mercury HF modem, CSMA, protocol sync with HBC-Protocol v1.6
+
+**Collision avoidance (all modems)**
+- New shared CSMA carrier sense (`CsmaSense`): RX audio energy is tracked
+  against an adaptive noise floor; the channel is considered busy while
+  incoming audio exceeds 4x the floor (held 400 ms past the last loud
+  chunk to bridge in-signal gaps).
+- p-persistent transmit backoff: before every TX the modem waits for a
+  clear channel, then a random 150-550 ms during which the channel must
+  stay clear — unsynchronizing stations that queued traffic while a
+  third station was transmitting. After 8 s (15 s on Mercury HF) the
+  frame is sent regardless so traffic cannot be starved.
+- Replaces the previous AFSK-only DCD polling (which rarely asserted and
+  had no backoff, so all three modems could transmit over a signal in
+  progress); the AFSK demodulator's DCD is still used as an additional
+  carrier-sense input on that modem.
 
 **Modems**
 - Third selectable modem: **Mercury HF** — the physical layer of the
