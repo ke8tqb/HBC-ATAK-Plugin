@@ -4,6 +4,20 @@ All notable changes to HBC Audio Plugin are documented here.
 
 ---
 
+## [0.11] — TAK third-party pipeline compliance
+
+- NDK pinned to 25.1.8937393, the newest version pre-installed on the TAK
+  third-party pipeline build machine (the pipeline only builds with its
+  pre-installed NDKs; the previously declared 27.0.12077973 is not among
+  them). Both civDebug and civRelease verified to compile with it.
+- Verified the remaining pipeline source-archive requirements already
+  hold: Gradle build at the repo root with assembleCivRelease defined,
+  atak-gradle-takdev used for all ATAK SDK references, plugin-specific
+  proguard repackage descriptor (atakplugin.HBC-ATAK-Plugin), and the
+  com.atakmap.app.component discovery activity in AndroidManifest.xml.
+
+---
+
 ## [0.10] — Mercury HF modem, CSMA, protocol sync with HBC-Protocol v1.6
 
 **Collision avoidance (all modems)**

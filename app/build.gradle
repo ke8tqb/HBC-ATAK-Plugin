@@ -8,7 +8,7 @@
 
 buildscript {
 
-    ext.PLUGIN_VERSION = "0.10"
+    ext.PLUGIN_VERSION = "0.11"
     // Must exactly match the host ATAK's declared plugin-api. ATAK-CIV
     // 5.5.1.x declares "com.atakmap.app@5.5.1.CIV" (the third digit is the
     // API level; the fourth is a patch that shares the same API).
@@ -110,7 +110,10 @@ def supportedFlavors =
 android {
     compileSdk 35
     namespace 'com.atakmap.android.hbc.plugin'
-    ndkVersion "27.0.12077973"
+    // Must be one of the NDK versions pre-installed on the TAK third-party
+    // pipeline build machine (the TPP does not install declared versions):
+    // 12.1.2977051, 21.0.6113669, 21.4.7075529, 23.0.7599858, 25.1.8937393
+    ndkVersion "25.1.8937393"
 
     externalNativeBuild {
         cmake {
