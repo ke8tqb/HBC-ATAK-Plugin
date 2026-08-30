@@ -4,6 +4,20 @@ All notable changes to HBC Audio Plugin are documented here.
 
 ---
 
+## [0.18] — Heard stations become ATAK chat contacts
+
+- Received PLIs are now reconstructed with a `<contact endpoint>` and a
+  `<__group>` detail. ATAK only registers a station as a messageable
+  contact (chat DM list, send-to pickers) when its PLI carries an
+  endpoint — previously heard stations plotted on the map but could not
+  be selected for a direct chat until they had messaged you first. Now
+  hearing a single PLI makes the station a selectable contact; outgoing
+  chat to it is intercepted by the plugin and sent over HBC/mesh as
+  before. (Mesh routing already learned the route from the same PLI, so
+  chat DMs to the station go routed Direct immediately.)
+
+---
+
 ## [0.17] — PLI countdown in the settings pane
 
 - New live "Next PLI" line under the status text: counts down (m:ss,

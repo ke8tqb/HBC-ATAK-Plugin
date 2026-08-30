@@ -148,11 +148,20 @@ public final class HbcDecoder {
             eventOpen(sb, uid, cotType, now, stale, how);
             point(sb, lat, lon);
             sb.append("  <detail>\n");
-            sb.append("    <contact callsign=\"").append(esc(name.isEmpty() ? callsign : name)).append("\"/>\n");
             if (!isSpot) {
+                // ATAK only registers a station as a messageable contact
+                // (chat DM list, "send to" pickers) when its PLI carries a
+                // <contact endpoint=...>. Use the standard mesh endpoint
+                // placeholder; outgoing chat to it is intercepted by the
+                // plugin's PreSendProcessor and sent over HBC anyway.
+                sb.append("    <contact callsign=\"")
+                  .append(esc(name.isEmpty() ? callsign : name))
+                  .append("\" endpoint=\"*:-1:stcp\"/>\n");
+                sb.append("    <__group name=\"Cyan\" role=\"Team Member\"/>\n");
                 sb.append("    <uid Droid=\"").append(esc(name.isEmpty() ? callsign : name)).append("\"/>\n");
                 sb.append("    <track speed=\"0.0\" course=\"9999999.0\"/>\n");
             } else {
+                sb.append("    <contact callsign=\"").append(esc(name.isEmpty() ? callsign : name)).append("\"/>\n");
                 sb.append("    <creator callsign=\"").append(esc(callsign)).append("\"/>\n");
                 sb.append("    <archive/>\n");
             }
