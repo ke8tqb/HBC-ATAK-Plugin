@@ -4,6 +4,26 @@ All notable changes to HBC Audio Plugin are documented here.
 
 ---
 
+## [0.14] — Radio icon fixes; PLI doubles as mesh announce
+
+- The "Announce min" setting is removed: your own transmissions (PLI
+  broadcasts especially) already announce the station to everyone in
+  range via passive route learning, so every TX now defers the periodic
+  mesh announce. A real announce only goes out automatically as a
+  keepalive after 10 quiet minutes with no traffic.
+
+- The radio status toolbar item now carries a fixed tool identifier, so
+  a user-dragged placement (e.g. pinned to the top row) survives the
+  icon swap when the modem starts/stops — previously the swap made the
+  icon vanish from the customized position.
+- Press-and-hold on the radio icon now starts/stops the audio modem
+  (with toast feedback); a short tap still opens the plugin pane. If no
+  callsign is configured yet, the hold opens settings instead.
+- Icon is rasterized at 192 px instead of the vector's 24 dp intrinsic
+  size, matching the sharpness of the stock toolbar icons.
+
+---
+
 ## [0.13] — Passive route learning + radio status toolbar icon
 
 - Passive route learning: hearing ANY mesh frame (PLI, marker, chat,

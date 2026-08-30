@@ -141,7 +141,19 @@ public final class MeshRouter {
     /** Broadcast an HBC payload to everyone in RF range (unacknowledged). */
     public void sendBroadcast(byte[] hbc) {
         int seq = nextSeq();
+        deferAnnounce();
         cb.transmitFrame(buildBroadcast(myCall, myCall, seq, hbc));
+    }
+
+    /**
+     * Any of our own traffic (PLI broadcasts especially) already announces
+     * this station to everyone who hears it via passive route learning, so
+     * push the next periodic announce out by a full interval. Announces
+     * then only fire as a keepalive when the station has been quiet.
+     */
+    private void deferAnnounce() {
+        if (announceIntervalMs > 0)
+            nextAnnounceMs = now() + announceIntervalMs;
     }
 
     /**
@@ -161,6 +173,7 @@ public final class MeshRouter {
             return;
         }
         int seq = nextSeq();
+        deferAnnounce();
         Pending p = new Pending();
         p.dest = dest; p.hbc = hbc; p.seq = seq; p.tries = 0;
         p.nextAttemptMs = now() + RETRY_BASE_MS + (long) random.nextInt((int) RETRY_JITTER_MS);

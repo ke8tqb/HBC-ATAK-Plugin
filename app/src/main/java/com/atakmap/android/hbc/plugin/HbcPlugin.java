@@ -80,7 +80,7 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     // UI
-    private EditText etCallsign, etDwell, etVoxLeader, etPliRate, etAnnounceRate;
+    private EditText etCallsign, etDwell, etVoxLeader, etPliRate;
     private android.widget.Spinner spTxStream, spModem, spSendTo;
     private CheckBox cbTxEnable, cbRxEnable, cbSelfPli, cbChat, cbAlerts, cbShapes,
             cbCasevac, cbSpots;
@@ -172,26 +172,36 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
      * Toolbar radio icon reflecting the radio-link state: electric green
      * while the audio modem is running, gray when stopped. Follows the same
      * `started` flag as the Start/Stop Radio Link button, so the two can
-     * never disagree. ToolbarItems are immutable, so the item is swapped.
+     * never disagree. Tap opens the plugin pane; press-and-hold toggles the
+     * radio link on/off.
+     *
+     * ToolbarItems are immutable, so the item is rebuilt on state change —
+     * a fixed identifier keeps ATAK treating it as the same tool, so a
+     * user-dragged toolbar placement survives the swap. The vector icon is
+     * rasterized at high resolution so it stays as sharp as the stock icons.
      */
+    private static final String RADIO_STATUS_ID = "hbc-radio-status";
+
     private void updateRadioStatusIcon() {
         if (uiService == null || pluginContext == null)
             return;
         try {
             if (radioStatusItem != null)
                 uiService.removeToolbarItem(radioStatusItem);
-            android.graphics.drawable.Drawable icon = pluginContext.getResources()
-                    .getDrawable(started ? R.drawable.ic_radio_on
-                                         : R.drawable.ic_radio_off);
             radioStatusItem = new ToolbarItem.Builder(
                     pluginContext.getString(R.string.hbc_radio_status_label),
-                    MarshalManager.marshal(icon,
+                    MarshalManager.marshal(renderRadioIcon(),
                             android.graphics.drawable.Drawable.class,
                             gov.tak.api.commons.graphics.Bitmap.class))
+                    .setIdentifier(RADIO_STATUS_ID)
                     .setListener(new ToolbarItemAdapter() {
                         @Override
                         public void onClick(ToolbarItem item) {
                             showPane();   // tap opens the plugin pane
+                        }
+                        @Override
+                        public void onLongClick(ToolbarItem item) {
+                            toggleRadioFromIcon();   // hold toggles the modem
                         }
                     })
                     .build();
@@ -199,6 +209,39 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
         } catch (Exception e) {
             Log.d(TAG, "radio status icon update failed: " + e.getMessage());
         }
+    }
+
+    /** Rasterize the state-colored vector at 192 px so it stays sharp. */
+    private android.graphics.drawable.Drawable renderRadioIcon() {
+        android.graphics.drawable.Drawable vector = pluginContext.getResources()
+                .getDrawable(started ? R.drawable.ic_radio_on
+                                     : R.drawable.ic_radio_off);
+        int px = 192;
+        android.graphics.Bitmap bmp = android.graphics.Bitmap.createBitmap(
+                px, px, android.graphics.Bitmap.Config.ARGB_8888);
+        android.graphics.Canvas canvas = new android.graphics.Canvas(bmp);
+        vector.setBounds(0, 0, px, px);
+        vector.draw(canvas);
+        return new android.graphics.drawable.BitmapDrawable(
+                pluginContext.getResources(), bmp);
+    }
+
+    /** Press-and-hold on the toolbar radio icon: start/stop the modem. */
+    private void toggleRadioFromIcon() {
+        if (started) {
+            stopRadio();
+            toast("HBC radio link stopped");
+        } else {
+            if (prefs == null || prefs.getString("callsign", "").isEmpty()) {
+                toast("Set your callsign in HBC settings first");
+                showPane();
+                return;
+            }
+            startRadio();
+            toast(started ? "HBC radio link started"
+                          : "HBC radio link failed to start — see log");
+        }
+        mainHandler.post(this::updateUiState);
     }
 
     // ------------------------------------------------------------------
@@ -221,7 +264,6 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
 
     private void bindViews(View v) {
         etCallsign  = v.findViewById(R.id.hbc_callsign);
-        etAnnounceRate = v.findViewById(R.id.hbc_announce_rate);
         etDwell     = v.findViewById(R.id.hbc_dwell);
         etVoxLeader = v.findViewById(R.id.hbc_vox_leader);
         etPliRate   = v.findViewById(R.id.hbc_pli_rate);
@@ -324,7 +366,6 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
 
     private void loadPrefs() {
         etCallsign.setText(prefs.getString("callsign", ""));
-        etAnnounceRate.setText(String.valueOf(prefs.getInt("announce_rate_min", 10)));
         etDwell.setText(String.valueOf(prefs.getInt("dwell_ms", 500)));
         etVoxLeader.setText(String.valueOf(prefs.getInt("vox_leader_ms", 0)));
         etPliRate.setText(String.valueOf(prefs.getInt("pli_rate_s", 60)));
@@ -360,7 +401,6 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
         prefs.edit()
                 .putString("callsign", callsign)
                 .putString("send_to", sendTo)
-                .putInt("announce_rate_min", intOf(etAnnounceRate, 10))
                 .putInt("dwell_ms", intOf(etDwell, 500))
                 .putInt("vox_leader_ms", intOf(etVoxLeader, 0))
                 .putInt("pli_rate_s", intOf(etPliRate, 60))
@@ -455,7 +495,10 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
                                 mainHandler.post(HbcPlugin.this::refreshSendTo);
                         }
                     });
-            mesh.setAnnounceIntervalMin(prefs.getInt("announce_rate_min", 10));
+            // Announces are automatic: our own traffic (PLI broadcasts etc.)
+            // acts as the announce via passive route learning; a real mesh
+            // announce only goes out as a keepalive after 10 quiet minutes.
+            mesh.setAnnounceIntervalMin(10);
             mesh.start();
             CommsMapComponent.getInstance().registerPreSendProcessor(this);
             started = true;

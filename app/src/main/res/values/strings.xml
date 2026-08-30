@@ -11,8 +11,6 @@
     <string name="hbc_callsign_label">Ham Callsign (FCC ID, max 8 chars)</string>
     <string name="hbc_callsign_hint">e.g. KE8TQB</string>
     <string name="hbc_send_to_label">Send to (mesh destination for markers/points)</string>
-    <string name="hbc_announce_label">Announce min</string>
-    <string name="hbc_announce_default">10</string>
     <string name="hbc_dwell_label">TX Dwell ms</string>
     <string name="hbc_dwell_default">500</string>
     <string name="hbc_vox_label">VOX Lead ms</string>
