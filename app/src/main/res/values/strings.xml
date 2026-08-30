@@ -39,6 +39,7 @@
     <string-array name="hbc_modem_options">
         <item>AFSK1200 / AX.25 (packet radio compatible)</item>
         <item>OFDM COFDMTV (rattlegram; robust, no digipeating)</item>
+        <item>Mercury HF (FreeDV DATAC4; SSB/HF, very low SNR)</item>
     </string-array>
     <string name="hbc_stream_label">TX audio stream (try others if your device distorts tones)</string>
     <string-array name="hbc_stream_options">

@@ -4,10 +4,21 @@ All notable changes to HBC Audio Plugin are documented here.
 
 ---
 
-## [Unreleased] — protocol sync with HBC-Protocol v1.5
+## [Unreleased] — Mercury HF modem + protocol sync with HBC-Protocol v1.6
 
-Brings `HbcEncoder`/`HbcDecoder` up to date with the reference Python
-implementation. No UI or transport changes.
+**Modems**
+- Third selectable modem: **Mercury HF** — the physical layer of the
+  Mercury HF modem (https://mercury.hermes.radio/, Rhizomatica), i.e. the
+  FreeDV DATAC raw-data OFDM waveform from codec2 (David Rowe et al.),
+  vendored at `app/src/main/cpp/mercury/` and compiled as native library
+  `libhbcmercury` with a JNI bridge (`MercuryNative`/`MercuryModem`).
+- Uses DATAC4 (~87 bps, works below 0 dB SNR on SSB/HF); bursts use
+  Mercury's exact layout: preamble → single data frame with CRC-16 in the
+  last two bytes → postamble, at 8000 Hz mono. HBC payloads are framed
+  inside the 54-byte DATAC4 frame as `len, 'H', payload, zero-pad`.
+- Note: this speaks Mercury's waveform/frame/CRC layout, not Mercury's
+  ARQ/broadcast data-link protocol — desktop Mercury will demodulate the
+  frames but will not route them to its TCP data interface.
 
 **Protocol**
 - HBC v1.4: Mode 3 (GeoChat) gains a 2-bit destination-kind field —

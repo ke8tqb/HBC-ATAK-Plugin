@@ -19,6 +19,7 @@ import com.atakmap.android.hbc.AudioModem;
 import com.atakmap.android.hbc.HbcDecoder;
 import com.atakmap.android.hbc.HbcEncoder;
 import com.atakmap.android.hbc.Ita2;
+import com.atakmap.android.hbc.MercuryModem;
 import com.atakmap.android.hbc.OfdmModem;
 import com.atakmap.comms.CommsMapComponent;
 import com.atakmap.coremap.cot.event.CotEvent;
@@ -66,6 +67,7 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
     private SharedPreferences prefs;
     private AudioModem modem;
     private OfdmModem ofdm;
+    private MercuryModem mercury;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     // UI
@@ -326,28 +328,46 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
     // ------------------------------------------------------------------
     // Radio lifecycle
     // ------------------------------------------------------------------
-    private boolean isOfdm() {
-        return prefs.getInt("modem_type", 0) == 1;
+    /** 0 = AFSK1200, 1 = OFDM (COFDMTV), 2 = Mercury HF (FreeDV DATAC) */
+    private int modemType() {
+        return prefs.getInt("modem_type", 0);
+    }
+
+    private String modemName() {
+        switch (modemType()) {
+            case 1:  return "OFDM";
+            case 2:  return "Mercury HF";
+            default: return "AFSK1200";
+        }
     }
 
     private synchronized void startRadio() {
         if (started) return;
         try {
-            if (isOfdm()) {
-                ofdm = new OfdmModem(pluginContext, this);
-                ofdm.setVoxLeaderMs(prefs.getInt("vox_leader_ms", 0));
-                ofdm.setTxStreamIndex(prefs.getInt("tx_stream", 0));
-                ofdm.start();
-            } else {
-                modem = new AudioModem(pluginContext, this);
-                modem.setTxDwellMs(prefs.getInt("dwell_ms", 500));
-                modem.setVoxLeaderMs(prefs.getInt("vox_leader_ms", 0));
-                modem.setTxStreamIndex(prefs.getInt("tx_stream", 0));
-                modem.start();
+            switch (modemType()) {
+                case 1:
+                    ofdm = new OfdmModem(pluginContext, this);
+                    ofdm.setVoxLeaderMs(prefs.getInt("vox_leader_ms", 0));
+                    ofdm.setTxStreamIndex(prefs.getInt("tx_stream", 0));
+                    ofdm.start();
+                    break;
+                case 2:
+                    mercury = new MercuryModem(pluginContext, this);
+                    mercury.setVoxLeaderMs(prefs.getInt("vox_leader_ms", 0));
+                    mercury.setTxStreamIndex(prefs.getInt("tx_stream", 0));
+                    mercury.start();
+                    break;
+                default:
+                    modem = new AudioModem(pluginContext, this);
+                    modem.setTxDwellMs(prefs.getInt("dwell_ms", 500));
+                    modem.setVoxLeaderMs(prefs.getInt("vox_leader_ms", 0));
+                    modem.setTxStreamIndex(prefs.getInt("tx_stream", 0));
+                    modem.start();
+                    break;
             }
             CommsMapComponent.getInstance().registerPreSendProcessor(this);
             started = true;
-            log("Radio link started (" + (isOfdm() ? "OFDM" : "AFSK1200") + ")");
+            log("Radio link started (" + modemName() + ")");
         } catch (Throwable e) {
             Log.e(TAG, "start failed", e);
             log("Start failed: " + e);
@@ -356,12 +376,13 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
     }
 
     private synchronized void stopRadio() {
-        if (modem != null || ofdm != null) {
+        if (modem != null || ofdm != null || mercury != null) {
             try {
                 CommsMapComponent.getInstance().registerPreSendProcessor(null);
             } catch (Exception ignored) {}
-            if (modem != null) { modem.stop(); modem = null; }
-            if (ofdm != null)  { ofdm.stop();  ofdm = null; }
+            if (modem != null)   { modem.stop();   modem = null; }
+            if (ofdm != null)    { ofdm.stop();    ofdm = null; }
+            if (mercury != null) { mercury.stop(); mercury = null; }
         }
         if (started) log("Radio link stopped");
         started = false;
@@ -372,7 +393,7 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
     // ------------------------------------------------------------------
     @Override
     public void processCotEvent(CotEvent event, String[] toUIDs) {
-        if (!started || (modem == null && ofdm == null)
+        if (!started || (modem == null && ofdm == null && mercury == null)
                 || !prefs.getBoolean("tx_enable", true))
             return;
         try {
@@ -392,6 +413,8 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
                             pa.senderCallsign, kind, pa.tag);
                     if (ofdm != null)
                         ofdm.transmit(prefs.getString("callsign", ""), ack.bytes);
+                    else if (mercury != null)
+                        mercury.transmit(prefs.getString("callsign", ""), ack.bytes);
                     else
                         modem.transmit(prefs.getString("dest", DEFAULT_DEST),
                                 prefs.getString("callsign", ""),
@@ -437,6 +460,8 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
 
             if (ofdm != null)
                 ofdm.transmit(myCall, enc.bytes);
+            else if (mercury != null)
+                mercury.transmit(myCall, enc.bytes);
             else
                 modem.transmit(dest, myCall, path, enc.bytes);
             log("Queued TX mode " + enc.mode + " (" + enc.bytes.length + " B) " + type);
