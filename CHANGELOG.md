@@ -4,6 +4,15 @@ All notable changes to HBC Audio Plugin are documented here.
 
 ---
 
+## [0.16] — Backlit radio icon when modem is on
+
+- When the audio modem is running, the toolbar radio icon now sits on a
+  soft light-green radial glow (backlit look) in addition to the
+  electric-green glyph; the glyph is inset slightly so the halo is
+  visible around it. Off state is unchanged (gray, no glow).
+
+---
+
 ## [0.15] — Radio icon: tap toggles the modem
 
 - ATAK core consumes toolbar long-presses to show the item tooltip, so

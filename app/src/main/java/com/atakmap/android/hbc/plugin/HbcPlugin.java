@@ -214,7 +214,11 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
         }
     }
 
-    /** Rasterize the state-colored vector at 192 px so it stays sharp. */
+    /**
+     * Rasterize the state-colored vector at 192 px so it stays sharp.
+     * When the modem is running, a soft light-green radial glow is painted
+     * behind the icon ("backlit" look).
+     */
     private android.graphics.drawable.Drawable renderRadioIcon() {
         android.graphics.drawable.Drawable vector = pluginContext.getResources()
                 .getDrawable(started ? R.drawable.ic_radio_on
@@ -223,7 +227,21 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
         android.graphics.Bitmap bmp = android.graphics.Bitmap.createBitmap(
                 px, px, android.graphics.Bitmap.Config.ARGB_8888);
         android.graphics.Canvas canvas = new android.graphics.Canvas(bmp);
-        vector.setBounds(0, 0, px, px);
+        if (started) {
+            // backlit glow: light green, bright at center, fading to clear
+            float c = px / 2f;
+            android.graphics.Paint glow = new android.graphics.Paint(
+                    android.graphics.Paint.ANTI_ALIAS_FLAG);
+            glow.setShader(new android.graphics.RadialGradient(
+                    c, c, c,
+                    new int[]{0xB4A8FFB0, 0x6E7CFF8C, 0x00000000},
+                    new float[]{0f, 0.55f, 1f},
+                    android.graphics.Shader.TileMode.CLAMP));
+            canvas.drawCircle(c, c, c, glow);
+        }
+        // inset the glyph slightly so the glow forms a visible halo
+        int inset = px / 8;
+        vector.setBounds(inset, inset, px - inset, px - inset);
         vector.draw(canvas);
         return new android.graphics.drawable.BitmapDrawable(
                 pluginContext.getResources(), bmp);
