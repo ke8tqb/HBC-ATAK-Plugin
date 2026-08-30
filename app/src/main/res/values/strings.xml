@@ -3,16 +3,15 @@
     <!-- App -->
     <string name="app_name">HBC Radio</string>
     <!-- description -->
-    <string name="app_desc">Ham Binary CoT (HBC) over AX.25 packet radio: encodes CoT events to compact HBC frames and transmits them as AFSK1200 audio for VOX-keyed ham radios; received audio is decoded back into ATAK.</string>
+    <string name="app_desc">Ham Binary CoT (HBC) over a distance-vector mesh: encodes CoT events to compact HBC frames, routes them via announce-based mesh networking, and transmits them as audio (AFSK1200, OFDM, or Mercury HF) for VOX-keyed ham radios; received audio is decoded back into ATAK.</string>
 
     <string name="hbc_title">HBC Packet Radio Link</string>
     <string name="hbc_stopped">STOPPED</string>
     <string name="hbc_callsign_label">Ham Callsign (FCC ID, max 8 chars)</string>
     <string name="hbc_callsign_hint">e.g. KE8TQB</string>
-    <string name="hbc_dest_label">AX.25 Destination</string>
-    <string name="hbc_dest_hint">HBC</string>
-    <string name="hbc_path_label">Digipeater Path (comma separated, optional)</string>
-    <string name="hbc_path_hint">e.g. WIDE1-1,WIDE2-1</string>
+    <string name="hbc_send_to_label">Send to (mesh destination for markers/points)</string>
+    <string name="hbc_announce_label">Announce min</string>
+    <string name="hbc_announce_default">10</string>
     <string name="hbc_dwell_label">TX Dwell ms</string>
     <string name="hbc_dwell_default">500</string>
     <string name="hbc_vox_label">VOX Lead ms</string>

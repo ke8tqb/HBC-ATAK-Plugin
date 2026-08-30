@@ -97,6 +97,10 @@ public final class HbcEncoder {
          *  tag -> messageId so incoming Mode 0 acks can be resolved. */
         public int chatMsgTag = -1;
         public String chatMessageId = "";
+        /** Mode 3 (v1.4+): destination kind (0 all / 1 room / 2 DM) and the
+         *  DM recipient callsign — used by the mesh layer to route DMs. */
+        public int chatDestKind = -1;
+        public String chatRecipient = "";
 
         Encoded(byte[] bytes, int mode, String callsign, String cotType) {
             this.bytes = bytes;
@@ -319,6 +323,8 @@ public final class HbcEncoder {
         Encoded enc = new Encoded(w.toBytes(), 3, sender, cotType);
         enc.chatMsgTag = msgTag;
         enc.chatMessageId = messageId;
+        enc.chatDestKind = destKind;
+        enc.chatRecipient = chatRecipient;
         return enc;
     }
 

@@ -4,6 +4,46 @@ All notable changes to HBC Audio Plugin are documented here.
 
 ---
 
+## [0.12] — Distance-vector mesh routing replaces AX.25 addressing
+
+Implements "Adaptation of Uncoordinated Distance-Vector Routing for
+Unencrypted Amateur Radio Networks" (Reticulum-style announce
+propagation, no cryptography) above all three modems.
+
+**Mesh networking (`MeshRouter`)**
+- 13-byte common header on every frame (type / origin / transmitter /
+  16-bit seq, callsigns bit-packed in the paper's ITA2 variant), plus
+  Announce (+hop count), Broadcast (+payload), Direct (+dest +next hop
+  +payload) and ACK (+dest +acked seq) packet types. Payloads carry
+  compact HBC binary (deviation from the paper's ITA2 text, for airtime).
+- Announce-based route discovery: periodic announces (configurable
+  interval, default 10 min, 0 = off) flood the mesh; lowest hop count
+  wins with first-heard tiebreak; routes expire after 30 min. [origin+seq]
+  dedup cache (5 min) prevents loops and broadcast storms.
+- Direct messages route hop-by-hop with next-hop rewrite at each router;
+  the destination returns an end-to-end ACK; the sender retries with the
+  same seq (5 s + jitter, max 3) and re-ACKs duplicate directs so a lost
+  ACK does not fail delivery. Verified against the paper's Appendix A
+  byte vectors and Appendix B 4-node trace (codec-test/MeshRouterTest;
+  note: the paper's K1ABC hex has an internal typo — byte 03 is DF per
+  its own bit math, not BF).
+
+**Plugin behavior**
+- GeoChat DMs (and their delivered/read receipts) automatically go as
+  routed Direct messages to the recipient callsign; markers/points use
+  the new "Send to" setting (Broadcast, or any station learned from
+  announces) — "send this point to my buddy X" is a spinner pick.
+  Direct falls back to broadcast (logged) when no route is known.
+- AX.25 Destination and Digipeater Path settings removed; on AFSK the
+  AX.25 UI frame remains only as PHY framing (fixed dest "HBC", source =
+  ham callsign for Part 97 ID). OFDM and Mercury carry mesh frames in
+  their existing payload framing.
+- Wire format is NOT compatible with 0.11 and earlier — all stations
+  must run 0.12+. On Mercury DATAC4, routed Directs are limited to
+  ~29-byte HBC payloads (all standard messages fit).
+
+---
+
 ## [0.11] — TAK third-party pipeline compliance
 
 - NDK pinned to 25.1.8937393, the newest version pre-installed on the TAK

@@ -20,12 +20,14 @@ import com.atakmap.android.hbc.HbcDecoder;
 import com.atakmap.android.hbc.HbcEncoder;
 import com.atakmap.android.hbc.Ita2;
 import com.atakmap.android.hbc.MercuryModem;
+import com.atakmap.android.hbc.MeshRouter;
 import com.atakmap.android.hbc.OfdmModem;
 import com.atakmap.comms.CommsMapComponent;
 import com.atakmap.coremap.cot.event.CotEvent;
 import com.atakmap.coremap.log.Log;
 
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Date;
 import java.util.HashMap;
@@ -55,8 +57,13 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
     private static final String TAG = "HbcPlugin";
     private static final String PREFS = "hbc_plugin_prefs";
 
-    // AX.25 destination "callsign" used to tag HBC traffic on the channel
+    // Fixed AX.25 destination used purely as PHY framing on the AFSK modem
+    // (the mesh header carries all real addressing; the AX.25 source still
+    // carries the ham callsign for Part 97 station ID)
     private static final String DEFAULT_DEST = "HBC";
+
+    // "Send to" spinner entry 0: unrouted broadcast
+    private static final String SEND_TO_BROADCAST = "Broadcast (everyone)";
 
     IServiceController serviceController;
     Context pluginContext;
@@ -68,11 +75,12 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
     private AudioModem modem;
     private OfdmModem ofdm;
     private MercuryModem mercury;
+    private MeshRouter mesh;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     // UI
-    private EditText etCallsign, etDest, etPath, etDwell, etVoxLeader, etPliRate;
-    private android.widget.Spinner spTxStream, spModem;
+    private EditText etCallsign, etDwell, etVoxLeader, etPliRate, etAnnounceRate;
+    private android.widget.Spinner spTxStream, spModem, spSendTo;
     private CheckBox cbTxEnable, cbRxEnable, cbSelfPli, cbChat, cbAlerts, cbShapes,
             cbCasevac, cbSpots;
     private Button btnStartStop;
@@ -167,14 +175,14 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
                     .setMetaValue(Pane.PREFERRED_HEIGHT_RATIO, 0.6D)
                     .build();
         }
+        refreshSendTo();
         if (!uiService.isPaneVisible(pane))
             uiService.showPane(pane, null);
     }
 
     private void bindViews(View v) {
         etCallsign  = v.findViewById(R.id.hbc_callsign);
-        etDest      = v.findViewById(R.id.hbc_dest);
-        etPath      = v.findViewById(R.id.hbc_path);
+        etAnnounceRate = v.findViewById(R.id.hbc_announce_rate);
         etDwell     = v.findViewById(R.id.hbc_dwell);
         etVoxLeader = v.findViewById(R.id.hbc_vox_leader);
         etPliRate   = v.findViewById(R.id.hbc_pli_rate);
@@ -219,6 +227,9 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
                 android.R.layout.simple_spinner_dropdown_item);
         spModem.setAdapter(modemAdapter);
 
+        spSendTo = v.findViewById(R.id.hbc_send_to);
+        refreshSendTo();
+
         btnTabSettings.setOnClickListener(view -> selectTab(false));
         btnTabDecodes.setOnClickListener(view -> selectTab(true));
         btnDecodesClear.setOnClickListener(view -> {
@@ -243,6 +254,27 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
         updateUiState();
     }
 
+    /**
+     * Rebuild the "Send to" spinner: Broadcast + every destination learned
+     * from mesh Announces, keeping the saved selection when possible.
+     */
+    private void refreshSendTo() {
+        if (spSendTo == null) return;
+        java.util.List<String> items = new ArrayList<>();
+        items.add(SEND_TO_BROADCAST);
+        if (mesh != null)
+            items.addAll(mesh.knownDestinations());
+        String saved = prefs == null ? "" : prefs.getString("send_to", "");
+        if (!saved.isEmpty() && !items.contains(saved))
+            items.add(saved);
+        android.widget.ArrayAdapter<String> adapter = new android.widget.ArrayAdapter<>(
+                pluginContext, android.R.layout.simple_spinner_item, items);
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        spSendTo.setAdapter(adapter);
+        int idx = saved.isEmpty() ? 0 : items.indexOf(saved);
+        spSendTo.setSelection(Math.max(0, idx));
+    }
+
     private void selectTab(boolean decodes) {
         if (tabSettings == null) return;
         tabSettings.setVisibility(decodes ? View.GONE : View.VISIBLE);
@@ -253,8 +285,7 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
 
     private void loadPrefs() {
         etCallsign.setText(prefs.getString("callsign", ""));
-        etDest.setText(prefs.getString("dest", DEFAULT_DEST));
-        etPath.setText(prefs.getString("path", ""));
+        etAnnounceRate.setText(String.valueOf(prefs.getInt("announce_rate_min", 10)));
         etDwell.setText(String.valueOf(prefs.getInt("dwell_ms", 500)));
         etVoxLeader.setText(String.valueOf(prefs.getInt("vox_leader_ms", 0)));
         etPliRate.setText(String.valueOf(prefs.getInt("pli_rate_s", 60)));
@@ -282,13 +313,15 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
             toast("Callsign must be \u2264 8 ITA2 characters (A-Z, 0-9, -)");
             return false;
         }
-        String dest = etDest.getText().toString().trim().toUpperCase();
-        if (dest.isEmpty()) dest = DEFAULT_DEST;
+        String sendTo = "";
+        if (spSendTo != null && spSendTo.getSelectedItemPosition() > 0
+                && spSendTo.getSelectedItem() != null)
+            sendTo = spSendTo.getSelectedItem().toString();
 
         prefs.edit()
                 .putString("callsign", callsign)
-                .putString("dest", dest)
-                .putString("path", etPath.getText().toString().trim().toUpperCase())
+                .putString("send_to", sendTo)
+                .putInt("announce_rate_min", intOf(etAnnounceRate, 10))
                 .putInt("dwell_ms", intOf(etDwell, 500))
                 .putInt("vox_leader_ms", intOf(etVoxLeader, 0))
                 .putInt("pli_rate_s", intOf(etPliRate, 60))
@@ -365,9 +398,29 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
                     modem.start();
                     break;
             }
+            // Mesh routing layer above the modem
+            mesh = new MeshRouter(prefs.getString("callsign", ""),
+                    new MeshRouter.Callbacks() {
+                        @Override
+                        public void onHbcPayload(String origin, byte[] hbc) {
+                            handleHbcRx(origin, hbc);
+                        }
+                        @Override
+                        public void transmitFrame(byte[] frame) {
+                            txFrame(frame);
+                        }
+                        @Override
+                        public void onStatus(String message) {
+                            log(message);
+                            if (message.startsWith("Mesh: route"))
+                                mainHandler.post(HbcPlugin.this::refreshSendTo);
+                        }
+                    });
+            mesh.setAnnounceIntervalMin(prefs.getInt("announce_rate_min", 10));
+            mesh.start();
             CommsMapComponent.getInstance().registerPreSendProcessor(this);
             started = true;
-            log("Radio link started (" + modemName() + ")");
+            log("Radio link started (" + modemName() + ", mesh routing)");
         } catch (Throwable e) {
             Log.e(TAG, "start failed", e);
             log("Start failed: " + e);
@@ -380,6 +433,7 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
             try {
                 CommsMapComponent.getInstance().registerPreSendProcessor(null);
             } catch (Exception ignored) {}
+            if (mesh != null)    { mesh.stop();    mesh = null; }
             if (modem != null)   { modem.stop();   modem = null; }
             if (ofdm != null)    { ofdm.stop();    ofdm = null; }
             if (mercury != null) { mercury.stop(); mercury = null; }
@@ -388,12 +442,28 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
         started = false;
     }
 
+    /** Hand a mesh frame to whichever modem is active (dumb byte pipe). */
+    private void txFrame(byte[] frame) {
+        try {
+            String myCall = prefs.getString("callsign", "");
+            if (ofdm != null)
+                ofdm.transmit(myCall, frame);
+            else if (mercury != null)
+                mercury.transmit(myCall, frame);
+            else if (modem != null)
+                modem.transmit(DEFAULT_DEST, myCall, new String[0], frame);
+        } catch (Exception e) {
+            log("TX error: " + e);
+        }
+    }
+
     // ------------------------------------------------------------------
     // Outbound: ATAK -> HBC -> AX.25 -> audio
     // ------------------------------------------------------------------
     @Override
     public void processCotEvent(CotEvent event, String[] toUIDs) {
-        if (!started || (modem == null && ofdm == null && mercury == null)
+        if (!started || mesh == null
+                || (modem == null && ofdm == null && mercury == null)
                 || !prefs.getBoolean("tx_enable", true))
             return;
         try {
@@ -411,14 +481,8 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
                     HbcEncoder.Encoded ack = HbcEncoder.encodeAck(
                             prefs.getString("callsign", ""),
                             pa.senderCallsign, kind, pa.tag);
-                    if (ofdm != null)
-                        ofdm.transmit(prefs.getString("callsign", ""), ack.bytes);
-                    else if (mercury != null)
-                        mercury.transmit(prefs.getString("callsign", ""), ack.bytes);
-                    else
-                        modem.transmit(prefs.getString("dest", DEFAULT_DEST),
-                                prefs.getString("callsign", ""),
-                                parsePath(prefs.getString("path", "")), ack.bytes);
+                    // route the chat receipt straight back to the DM sender
+                    mesh.sendDirect(pa.senderCallsign, ack.bytes);
                     log("Queued TX mode 0 ack (" + type + ") -> "
                             + pa.senderCallsign + " tag 0x"
                             + String.format("%04X", pa.tag));
@@ -454,16 +518,17 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
             pruneOld(recentTx, 300000);
 
             HbcEncoder.Encoded enc = HbcEncoder.encode(event.toString());
-            String myCall = prefs.getString("callsign", "");
-            String dest = prefs.getString("dest", DEFAULT_DEST);
-            String[] path = parsePath(prefs.getString("path", ""));
 
-            if (ofdm != null)
-                ofdm.transmit(myCall, enc.bytes);
-            else if (mercury != null)
-                mercury.transmit(myCall, enc.bytes);
-            else
-                modem.transmit(dest, myCall, path, enc.bytes);
+            if (enc.mode == 3 && enc.chatDestKind == 2 && !enc.chatRecipient.isEmpty()) {
+                // GeoChat DM: automatically route direct to the recipient
+                mesh.sendDirect(enc.chatRecipient, enc.bytes);
+            } else {
+                String sendTo = prefs.getString("send_to", "");
+                if (!sendTo.isEmpty())
+                    mesh.sendDirect(sendTo, enc.bytes);
+                else
+                    mesh.sendBroadcast(enc.bytes);
+            }
             log("Queued TX mode " + enc.mode + " (" + enc.bytes.length + " B) " + type);
 
             // v1.6: remember outgoing DM tags so incoming Mode 0 acks can be
@@ -508,21 +573,15 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
         return cb != null ? cb.isChecked() : prefs.getBoolean(key, true);
     }
 
-    private static String[] parsePath(String s) {
-        if (s == null || s.trim().isEmpty()) return new String[0];
-        String[] parts = s.split("[,\\s]+");
-        return Arrays.stream(parts).filter(p -> !p.isEmpty()).toArray(String[]::new);
-    }
-
     // ------------------------------------------------------------------
-    // Inbound: audio -> AX.25 -> HBC -> ATAK
+    // Inbound: audio -> mesh -> HBC -> ATAK
     // ------------------------------------------------------------------
     @Override
     public void onFrame(byte[] ax25Frame) {
         if (!started || !prefs.getBoolean("rx_enable", true))
             return;
         try {
-            // dedup identical frames heard twice (digipeats / dual demod)
+            // dedup identical frames heard twice (echoes / dual demod)
             int hash = Arrays.hashCode(ax25Frame);
             long now = System.currentTimeMillis();
             Long seen = recentRx.get(hash);
@@ -537,51 +596,20 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
             if (payload == null || payload.length == 0)
                 return;
 
-            HbcDecoder.Decoded dec = HbcDecoder.decode(payload);
-
-            // ignore our own transmissions (heard via our own mic/audio
-            // loopback or digipeated back). The AX.25 source address is our
-            // configured ham callsign; the HBC header callsign is the ATAK
-            // device callsign — check both.
+            // ignore our own transmissions heard back (loopback / echo):
+            // the AX.25 source address is our configured ham callsign
             String myCall = prefs.getString("callsign", "");
             String srcBase = p.source == null ? ""
                     : (p.source.contains("-")
                             ? p.source.substring(0, p.source.indexOf('-'))
                             : p.source);
-            if (srcBase.equalsIgnoreCase(myCall)
-                    || dec.callsign.equalsIgnoreCase(myCall))
-                return;
-            try {
-                String atakCallsign = com.atakmap.android.maps.MapView
-                        .getMapView().getDeviceCallsign();
-                if (atakCallsign != null
-                        && dec.callsign.equalsIgnoreCase(atakCallsign))
-                    return;
-            } catch (Exception ignored) {}
-
-            if (dec.mode == 0) {
-                handleAckRx(dec);
-                return;
-            }
-            if (!resolveDirectMessage(dec))
+            if (srcBase.equalsIgnoreCase(myCall))
                 return;
 
-            String xml = dec.toXml();
-            CotEvent event = CotEvent.parse(xml);
-            if (event == null || !event.isValid()) {
-                log("RX decode produced invalid CoT (" + dec.summary() + ")");
-                return;
-            }
-            CotMapComponent.getInternalDispatcher().dispatch(event);
-            registerIncomingDm(dec);
-            log("RX " + p.source + ">" + p.destination + " " + dec.summary());
-            logDecode(p.source + " > " + p.destination
-                    + (p.path != null && p.path.length > 0
-                            ? " via " + String.join(",", p.path) : "")
-                    + "\n  " + dec.summary()
-                    + "\n  " + payload.length + " B payload");
+            if (mesh != null)
+                mesh.onRadioFrame(payload);
         } catch (Exception e) {
-            Log.d(TAG, "RX frame not HBC: " + e.getMessage());
+            Log.d(TAG, "RX frame not mesh: " + e.getMessage());
         }
     }
 
@@ -591,15 +619,15 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
     }
 
     // ------------------------------------------------------------------
-    // Inbound (OFDM): audio -> COFDMTV -> HBC -> ATAK
+    // Inbound (OFDM / Mercury): audio -> mesh -> HBC -> ATAK
     // ------------------------------------------------------------------
     @Override
-    public void onPayload(String callsign, byte[] hbcPayload) {
+    public void onPayload(String callsign, byte[] meshFrame) {
         if (!started || !prefs.getBoolean("rx_enable", true))
             return;
         try {
-            // dedup identical payloads (repeats / echoes)
-            int hash = Arrays.hashCode(hbcPayload) * 31 + callsign.hashCode();
+            // dedup identical frames (repeats / echoes)
+            int hash = Arrays.hashCode(meshFrame) * 31 + callsign.hashCode();
             long now = System.currentTimeMillis();
             Long seen = recentRx.get(hash);
             if (seen != null && now - seen < 30000)
@@ -608,12 +636,27 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
             pruneOld(recentRx, 300000);
 
             String myCall = prefs.getString("callsign", "");
-            if (callsign.equalsIgnoreCase(myCall))
+            if (!callsign.isEmpty() && callsign.equalsIgnoreCase(myCall))
                 return; // our own transmission heard back
 
+            if (mesh != null)
+                mesh.onRadioFrame(meshFrame);
+        } catch (Exception e) {
+            Log.d(TAG, "RX payload not mesh: " + e.getMessage());
+        }
+    }
+
+    /**
+     * A mesh Broadcast/Direct payload delivered to this station: run the
+     * HBC decode pipeline and inject the CoT into ATAK.
+     */
+    private void handleHbcRx(String origin, byte[] hbcPayload) {
+        try {
             HbcDecoder.Decoded dec = HbcDecoder.decode(hbcPayload);
+
+            String myCall = prefs.getString("callsign", "");
             if (dec.callsign.equalsIgnoreCase(myCall))
-                return;
+                return;   // our own transmission echoed back
             try {
                 String atakCallsign = com.atakmap.android.maps.MapView
                         .getMapView().getDeviceCallsign();
@@ -637,12 +680,12 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
             }
             CotMapComponent.getInternalDispatcher().dispatch(event);
             registerIncomingDm(dec);
-            log("RX OFDM " + callsign + " " + dec.summary());
-            logDecode(callsign + " (OFDM)"
+            log("RX " + origin + " " + dec.summary());
+            logDecode(origin
                     + "\n  " + dec.summary()
                     + "\n  " + hbcPayload.length + " B payload");
         } catch (Exception e) {
-            Log.d(TAG, "OFDM payload not HBC: " + e.getMessage());
+            Log.d(TAG, "RX payload not HBC: " + e.getMessage());
         }
     }
 
