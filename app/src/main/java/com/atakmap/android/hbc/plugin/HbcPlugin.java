@@ -69,6 +69,7 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
     Context pluginContext;
     IHostUIService uiService;
     ToolbarItem toolbarItem;
+    ToolbarItem radioStatusItem;
     Pane pane;
 
     private SharedPreferences prefs;
@@ -152,6 +153,7 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
             return;
         uiService.addToolbarItem(toolbarItem);
         prefs = pluginContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        updateRadioStatusIcon();
     }
 
     @Override
@@ -159,7 +161,44 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
         stopRadio();
         if (uiService == null)
             return;
+        if (radioStatusItem != null) {
+            uiService.removeToolbarItem(radioStatusItem);
+            radioStatusItem = null;
+        }
         uiService.removeToolbarItem(toolbarItem);
+    }
+
+    /**
+     * Toolbar radio icon reflecting the radio-link state: electric green
+     * while the audio modem is running, gray when stopped. Follows the same
+     * `started` flag as the Start/Stop Radio Link button, so the two can
+     * never disagree. ToolbarItems are immutable, so the item is swapped.
+     */
+    private void updateRadioStatusIcon() {
+        if (uiService == null || pluginContext == null)
+            return;
+        try {
+            if (radioStatusItem != null)
+                uiService.removeToolbarItem(radioStatusItem);
+            android.graphics.drawable.Drawable icon = pluginContext.getResources()
+                    .getDrawable(started ? R.drawable.ic_radio_on
+                                         : R.drawable.ic_radio_off);
+            radioStatusItem = new ToolbarItem.Builder(
+                    pluginContext.getString(R.string.hbc_radio_status_label),
+                    MarshalManager.marshal(icon,
+                            android.graphics.drawable.Drawable.class,
+                            gov.tak.api.commons.graphics.Bitmap.class))
+                    .setListener(new ToolbarItemAdapter() {
+                        @Override
+                        public void onClick(ToolbarItem item) {
+                            showPane();   // tap opens the plugin pane
+                        }
+                    })
+                    .build();
+            uiService.addToolbarItem(radioStatusItem);
+        } catch (Exception e) {
+            Log.d(TAG, "radio status icon update failed: " + e.getMessage());
+        }
     }
 
     // ------------------------------------------------------------------
@@ -420,6 +459,7 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
             mesh.start();
             CommsMapComponent.getInstance().registerPreSendProcessor(this);
             started = true;
+            mainHandler.post(this::updateRadioStatusIcon);
             log("Radio link started (" + modemName() + ", mesh routing)");
         } catch (Throwable e) {
             Log.e(TAG, "start failed", e);
@@ -440,6 +480,7 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
         }
         if (started) log("Radio link stopped");
         started = false;
+        mainHandler.post(this::updateRadioStatusIcon);
     }
 
     /** Hand a mesh frame to whichever modem is active (dumb byte pipe). */

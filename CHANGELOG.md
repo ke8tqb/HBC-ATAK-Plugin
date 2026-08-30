@@ -4,6 +4,21 @@ All notable changes to HBC Audio Plugin are documented here.
 
 ---
 
+## [0.13] — Passive route learning + radio status toolbar icon
+
+- Passive route learning: hearing ANY mesh frame (PLI, marker, chat,
+  ack, relay) immediately makes the transmitter a 0-hop neighbor and the
+  originator routable via that transmitter — a station shows up in the
+  "Send to" list as soon as anything is heard from it, no announce or
+  prior chat exchange required. Existing routes are only replaced by
+  strictly better paths; equal paths just refresh the 30-min TTL.
+- New toolbar radio icon showing the audio-modem state: electric green
+  while the radio link is running, gray when stopped. Driven by the same
+  state as the Start/Stop Radio Link button, so the two cannot disagree;
+  tapping it opens the plugin pane.
+
+---
+
 ## [0.12] — Distance-vector mesh routing replaces AX.25 addressing
 
 Implements "Adaptation of Uncoordinated Distance-Vector Routing for

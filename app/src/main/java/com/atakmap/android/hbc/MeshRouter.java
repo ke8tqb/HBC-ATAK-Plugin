@@ -223,6 +223,19 @@ public final class MeshRouter {
             String sig = origin + "|" + seq + "|" + type;
             boolean duplicate = checkAndCache(sig);
 
+            // Passive route learning: hearing ANY frame is proof of a path.
+            // The transmitter of this hop is a direct neighbor (0 hops), and
+            // for non-announce frames the origin is reachable via that
+            // transmitter. This makes a station selectable as a destination
+            // as soon as we hear a PLI/marker/chat from it — no announce or
+            // prior chat required. (Announces manage the origin themselves.)
+            if (type >= TYPE_ANNOUNCE && type <= TYPE_ACK) {
+                if (!transmitter.isEmpty() && !transmitter.equalsIgnoreCase(myCall))
+                    learnRoute(transmitter, transmitter, 0);
+                if (type != TYPE_ANNOUNCE && !origin.equalsIgnoreCase(transmitter))
+                    learnRoute(origin, transmitter, 1);
+            }
+
             switch (type) {
                 case TYPE_ANNOUNCE:
                     if (duplicate) return;
@@ -246,6 +259,31 @@ public final class MeshRouter {
         } catch (Exception e) {
             cb.onStatus("Mesh: RX frame error: " + e.getMessage());
         }
+    }
+
+    /**
+     * Insert or refresh a routing-table entry. Existing routes are only
+     * replaced by strictly better (fewer-hop) paths; equal-cost paths over
+     * the same next hop just reset the TTL. Emits a "Mesh: route" status
+     * (which also refreshes the Send-to UI) only when something changed.
+     */
+    private void learnRoute(String dest, String nextHop, int hops) {
+        boolean changed = false;
+        synchronized (routes) {
+            Route r = routes.get(dest);
+            if (r == null || hops < r.hops) {
+                if (r == null) { r = new Route(); routes.put(dest, r); changed = true; }
+                else if (!nextHop.equalsIgnoreCase(r.nextHop)) changed = true;
+                r.nextHop = nextHop;
+                r.hops = hops;
+                r.lastSeen = now();
+            } else if (hops == r.hops && nextHop.equalsIgnoreCase(r.nextHop)) {
+                r.lastSeen = now();
+            }
+        }
+        if (changed)
+            cb.onStatus("Mesh: route " + dest + " via " + nextHop
+                    + " (" + (hops + 1) + " hop" + (hops == 0 ? "" : "s") + ") [heard]");
     }
 
     private void handleAnnounce(byte[] f, String origin, String transmitter, int seq) {

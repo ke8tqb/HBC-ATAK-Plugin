@@ -22,6 +22,7 @@ public final class MeshRouterTest {
         testTightCallsign();
         testFourNodeAnnounceTrace();
         testDirectForwardAndAck();
+        testPassiveLearning();
         System.out.println(failures == 0
                 ? "\nAll MeshRouter tests PASSED"
                 : "\n" + failures + " MeshRouter test(s) FAILED");
@@ -177,6 +178,29 @@ public final class MeshRouterTest {
         check("A retried the unacked direct", a.txed.size() == 2);
         check("retry reuses sequence ID",
                 first[11] == a.txed.get(1)[11] && first[12] == a.txed.get(1)[12]);
+    }
+
+    // Hearing ANY traffic (e.g. a PLI broadcast) must make the sender a
+    // routable destination — no announce or prior chat required.
+    private static void testPassiveLearning() {
+        Node b = new Node("B1B");
+        byte[] pli = MeshRouter.buildBroadcast("A1A", "A1A", 0x0042,
+                new byte[]{0x01, 0x02});
+        b.router.onRadioFrame(pli);
+        check("broadcast sender becomes routable",
+                b.router.knownDestinations().contains("A1A"));
+        check("broadcast sender is a 1-hop neighbor",
+                b.router.routingTableSummary().contains("A1A via A1A (1 hop)"));
+
+        // Relayed direct: origin learned via the relaying transmitter.
+        Node d = new Node("D1D");
+        byte[] relayed = MeshRouter.buildDirect("A1A", "C1C", 0x0043,
+                "E1E", "E1E", new byte[]{0x01});
+        d.router.onRadioFrame(relayed);
+        check("relay transmitter becomes routable",
+                d.router.routingTableSummary().contains("C1C via C1C (1 hop)"));
+        check("relayed origin routable via transmitter",
+                d.router.routingTableSummary().contains("A1A via C1C (2 hops)"));
     }
 
     private static void check(String name, boolean ok) {
