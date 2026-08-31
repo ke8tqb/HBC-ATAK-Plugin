@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -35,7 +35,7 @@
   <h1>HBC RADIO</h1>
   <div class="sub">ATAK Plugin &mdash; Interface Control Document</div>
   <div class="sub">Ham Binary CoT over Distance-Vector Mesh Radio</div>
-  <div class="contact">Version 1.1 &nbsp;|&nbsp; KE8TQB &nbsp;|&nbsp; github.com/ke8tqb/HBC-ATAK-Plugin</div>
+  <div class="contact">Version 1.2 &nbsp;|&nbsp; KE8TQB &nbsp;|&nbsp; github.com/ke8tqb/HBC-ATAK-Plugin</div>
 </div>
 
 <div class="toc">
@@ -73,7 +73,15 @@
       <li>5.5 &nbsp;Contact Publication</li>
     </ol>
   </li>
-  <li>User Interface Reference (Screenshots)</li>
+  <li>User Interface Reference (Screenshots)
+    <ol>
+      <li>6.1 &nbsp;Screen-by-Screen Figures</li>
+      <li>6.2 &nbsp;Every Control and What It Does</li>
+      <li>6.3 &nbsp;Toolbar Icons</li>
+      <li>6.4 &nbsp;Reading the Activity Log</li>
+      <li>6.5 &nbsp;Reading the Decodes Log</li>
+    </ol>
+  </li>
   <li>Timing Parameters and Constants</li>
   <li>Compatibility and Constraints</li>
   <li>Glossary</li>
@@ -347,8 +355,10 @@ intercepted by the plugin and transmitted over the mesh.</p>
 
 <div class="pagebreak"></div>
 <h2>6. User Interface Reference (Screenshots)</h2>
-<p>All configuration lives in one pane, opened from the HBC toolbar icon. The figures below
-show each control described in this document.</p>
+<p>All configuration lives in one pane, opened from the HBC toolbar icon. This section shows
+each screen (6.1), explains every control (6.2) and toolbar icon (6.3), and teaches how to
+read the two logs (6.4, 6.5).</p>
+<h3>6.1 Screen-by-Screen Figures</h3>
 
 <div class="figure">
   <img src="images/fig1_settings_pane.jpg" alt="HBC settings pane">
@@ -391,6 +401,107 @@ show each control described in this document.</p>
   <div class="cap">Figure 6 &mdash; The Decodes tab: a running log of every packet
   successfully received and decoded, with sender, mode, and payload size.</div>
 </div>
+
+<h3>6.2 Every Control and What It Does</h3>
+<p>Top to bottom through the Settings tab (Figures 1 and 5):</p>
+<table>
+  <tr><th>Control</th><th>Type</th><th>What it does</th></tr>
+  <tr><td>Settings / Decodes</td><td>Tab buttons</td><td>Switch between the configuration screen and the received-packet log. The active tab&rsquo;s button is grayed out.</td></tr>
+  <tr><td>Status line</td><td>Text</td><td><code>RUNNING as {callsign}</code> while the modem is on; <code>STOPPED</code> otherwise. Mirrors the toolbar radio icon color.</td></tr>
+  <tr><td>Next PLI</td><td>Live text (1 s updates)</td><td>Countdown until the next position report may transmit: <code>in m:ss</code>, <code>ready (waiting for ATAK position update)</code>, <code>disabled</code> (TX or PLI unchecked), or <code>&mdash; (radio off)</code>.</td></tr>
+  <tr><td>Ham Callsign</td><td>Text field</td><td>Your FCC callsign, max 8 characters (A&ndash;Z, 0&ndash;9, hyphen). Used as this station&rsquo;s mesh address and legal station ID. Required before starting.</td></tr>
+  <tr><td>Send to</td><td>Dropdown</td><td>Destination for markers/points you create: <code>Broadcast (everyone)</code>, or any heard station for a routed, acknowledged Direct (section 4.5). Chat DMs ignore this and always route to their recipient automatically.</td></tr>
+  <tr><td>TX Dwell ms</td><td>Number field</td><td>AFSK only: length of the HDLC flag preamble sent before data so the receiving modem can sync. Default 500. Increase if receivers miss the start of packets.</td></tr>
+  <tr><td>VOX Lead ms</td><td>Number field</td><td>Warm-up audio played before data so a VOX-keyed radio has time to key up. Default 0 (use 0 with a hardwired PTT interface). Increase if the first part of transmissions is cut off.</td></tr>
+  <tr><td>PLI min s</td><td>Number field</td><td>Minimum seconds between your own position reports (rate limit). Default 60. Drives the &ldquo;Next PLI&rdquo; countdown.</td></tr>
+  <tr><td>Modem</td><td>Dropdown</td><td>Which of the three waveforms to use (section 3, Figure 3). Must match on every station.</td></tr>
+  <tr><td>TX audio stream</td><td>Dropdown</td><td>Which Android audio channel carries the transmit tones (Figure 4). Default Alarm; try the others only if your device distorts the tones.</td></tr>
+  <tr><td>Transmit / Receive</td><td>Checkboxes</td><td>Master switches. Unchecking Transmit makes the station receive-only; unchecking Receive ignores all incoming audio.</td></tr>
+  <tr><td>PLI, Spots, Alerts, Chat, Shapes, CASEVAC</td><td>Checkboxes</td><td>Per-type transmit filters, matching the HBC modes of section 5.2. An unchecked type is never transmitted (receiving is unaffected).</td></tr>
+  <tr><td>Start / Stop Radio Link</td><td>Button</td><td>Validates and saves the settings, then starts (or stops) the selected modem and the mesh layer. The label flips to match the current state.</td></tr>
+  <tr><td>Activity Log</td><td>Scrolling text</td><td>Timestamped diagnostic feed of everything the plugin does (section 6.4). Newest entries on top.</td></tr>
+  <tr><td>Clear (Decodes tab)</td><td>Button</td><td>Empties the Decodes log and resets its packet counter.</td></tr>
+</table>
+
+<h3>6.3 Toolbar Icons</h3>
+<table>
+  <tr><th>Icon</th><th>Tap</th><th>Notes</th></tr>
+  <tr><td>HBC plugin icon (antenna &ldquo;X&rdquo;)</td><td>Opens the settings pane</td><td>The plugin&rsquo;s main entry point in ATAK&rsquo;s toolbar/plugin list.</td></tr>
+  <tr><td>Radio status icon</td><td>Starts/stops the modem (with a confirmation toast)</td><td>Gray = modem stopped; electric green with a light-green glow = modem running. Long-press shows the state tooltip (&ldquo;HBC Radio: RUNNING (tap to stop)&rdquo; / &ldquo;STOPPED (tap to start)&rdquo;). If no callsign is saved yet, tapping opens settings instead. Can be dragged into ATAK&rsquo;s top toolbar row like any tool.</td></tr>
+</table>
+
+<h3>6.4 Reading the Activity Log</h3>
+<p>Every line starts with a <code>HH:mm:ss</code> timestamp; the newest line is at the top.
+The tables below list the messages verbatim (<code>{braces}</code> mark values filled in at
+runtime) and what each one means.</p>
+<p><b>Radio link and modem:</b></p>
+<table>
+  <tr><th>Message</th><th>Meaning</th></tr>
+  <tr><td class="mono">Radio link started ({modem}, mesh routing)</td><td>Start succeeded; the named modem and the mesh layer are running.</td></tr>
+  <tr><td class="mono">Radio link stopped</td><td>The modem was stopped (button, icon tap, or plugin shutdown).</td></tr>
+  <tr><td class="mono">Start failed: {error}</td><td>The modem could not start (usually a microphone/audio problem). The link is left stopped.</td></tr>
+  <tr><td class="mono">Modem started ... / RX audio source: {source}</td><td>Which microphone source the receiver opened (VOICE_RECOGNITION, UNPROCESSED, or MIC; &ldquo;via USB&rdquo; when a Digirig-style interface is attached).</td></tr>
+  <tr><td class="mono">RX disabled: microphone unavailable</td><td>ATAK lacks the RECORD_AUDIO permission or another app holds the mic; receiving is off.</td></tr>
+  <tr><td class="mono">TX {details} ({n} ms burst)</td><td>A transmission finished playing; <code>n</code> is its on-air duration.</td></tr>
+  <tr><td class="mono">CSMA: channel busy &mdash; deferring TX</td><td>Someone else is on the air; the plugin is politely waiting (section 3.4).</td></tr>
+  <tr><td class="mono">CSMA: channel busy &gt; 8 s &mdash; transmitting anyway</td><td>The channel never cleared, so the frame was sent to avoid starving traffic.</td></tr>
+  <tr><td class="mono">OFDM sync: {call} ... / Mercury sync acquired</td><td>The demodulator locked onto an incoming signal (decode result follows).</td></tr>
+</table>
+<p><b>Transmit decisions:</b></p>
+<table>
+  <tr><th>Message</th><th>Meaning</th></tr>
+  <tr><td class="mono">TX candidate: {type} uid {uid}</td><td>ATAK asked to send this event; the plugin is deciding whether to transmit it.</td></tr>
+  <tr><td class="mono">Queued TX mode {n} ({x} B) {type}</td><td>The event was encoded as HBC mode <code>n</code> (<code>x</code> bytes) and handed to the mesh for transmission.</td></tr>
+  <tr><td class="mono">Queued TX mode 0 ack ({type}) -&gt; {call} tag 0x{tag}</td><td>A chat delivered/read receipt is being sent back to a DM sender (section 5.4).</td></tr>
+  <tr><td class="mono">TX skip: type {type} disabled in settings</td><td>Dropped: that message type&rsquo;s checkbox is off.</td></tr>
+  <tr><td class="mono">TX skip: PLI rate limit</td><td>Dropped: a position report arrived before &ldquo;PLI min s&rdquo; elapsed (see the Next PLI countdown).</td></tr>
+  <tr><td class="mono">TX skip: duplicate within 10 s</td><td>Dropped: ATAK re-sent the same event; the copy was suppressed to save airtime.</td></tr>
+  <tr><td class="mono">TX skip: {reason}</td><td>Dropped: the event has no HBC representation (e.g. text with unsupported characters, coordinates out of range).</td></tr>
+</table>
+<p><b>Mesh routing:</b></p>
+<table>
+  <tr><th>Message</th><th>Meaning</th></tr>
+  <tr><td class="mono">Mesh: route {call} via {call2} ({n} hops)</td><td>Address-book update: {call} is now reachable by handing frames to {call2}. A trailing <code>[heard]</code> means it was learned passively just by hearing traffic (section 4.7). The Send-to list refreshes.</td></tr>
+  <tr><td class="mono">Mesh: announce sent (seq {n})</td><td>The 10-minute quiet-time keepalive announce went out.</td></tr>
+  <tr><td class="mono">Mesh: direct to {call} via {call2} (seq {n})</td><td>A routed Direct left this station; an ACK is now awaited.</td></tr>
+  <tr><td class="mono">Mesh: {call} acknowledged seq {n}</td><td>Delivery confirmed &mdash; the destination&rsquo;s ACK arrived.</td></tr>
+  <tr><td class="mono">Mesh: retry {i}/3 to {call} via {call2}</td><td>No ACK yet; the Direct was re-sent (same sequence ID).</td></tr>
+  <tr><td class="mono">Mesh: direct to {call} FAILED (no ack after 3 retries)</td><td>Delivery gave up. The station is likely out of range or off.</td></tr>
+  <tr><td class="mono">Mesh: no route to {call} &mdash; sending as broadcast</td><td>No address-book entry for the destination, so the message went out unrouted; the station will still get it if in direct range.</td></tr>
+  <tr><td class="mono">Mesh: forwarding {call} -&gt; {call2} via {call3}</td><td>This station is acting as a relay for someone else&rsquo;s Direct.</td></tr>
+  <tr><td class="mono">Mesh: no route to {call} &mdash; direct dropped</td><td>Asked to relay a Direct but no route to the destination is known.</td></tr>
+</table>
+<p><b>Receive decisions:</b></p>
+<table>
+  <tr><th>Message</th><th>Meaning</th></tr>
+  <tr><td class="mono">RX {call} {summary}</td><td>A packet was decoded and injected into ATAK (the same event also appears in the Decodes tab, section 6.5).</td></tr>
+  <tr><td class="mono">RX chat: DM for '{call}' &mdash; not this station, ignored</td><td>A direct chat addressed to someone else was overheard and correctly not shown.</td></tr>
+  <tr><td class="mono">RX ack for '{call}' &mdash; not this station, ignored</td><td>Same, for a chat receipt.</td></tr>
+  <tr><td class="mono">RX ack tag 0x{tag} &mdash; no matching sent DM, ignored</td><td>A receipt arrived for a message this station has no record of sending (e.g. app restarted).</td></tr>
+  <tr><td class="mono">RX decode produced invalid CoT ({summary})</td><td>The packet decoded but ATAK rejected the rebuilt event &mdash; report this as a bug.</td></tr>
+</table>
+
+<h3>6.5 Reading the Decodes Log</h3>
+<p>The Decodes tab (Figure 6) lists only <i>successfully decoded</i> packets &mdash; a clean
+record of what actually arrived. The header shows a running total
+(<code>{n} packet(s) decoded</code>; Clear resets it). Each entry has three lines:</p>
+<p class="mono">[{MM-dd HH:mm:ss}]&nbsp; {origin callsign}<br>
+&nbsp;&nbsp;{message summary}<br>
+&nbsp;&nbsp;{n} B payload</p>
+<p>The summary line identifies the HBC mode and its key contents:</p>
+<table>
+  <tr><th>Summary format</th><th>How to read it</th></tr>
+  <tr><td class="mono">Mode 1 PLI {call} '{name}' @ {lat},{lon}</td><td>Position report from {call}; the marker {name} was placed/updated at those coordinates. <code>Spot</code> instead of <code>PLI</code> means a placed marker, not a self-position.</td></tr>
+  <tr><td class="mono">Mode 2 Alert(ACTIVE) {name} @ {lat},{lon}</td><td>A 911 emergency from {name} at that location. <code>(CANCEL)</code> means the emergency was called off.</td></tr>
+  <tr><td class="mono">Mode 3 Chat {call}: {text}</td><td>A chat message and its text (broadcast, room, or DM &mdash; DMs for other stations are never injected).</td></tr>
+  <tr><td class="mono">Mode 0 Ack(DELIVERED) {call} -&gt; {call2} tag 0x{tag}</td><td>{call} confirms a DM from {call2} was delivered; <code>(READ)</code> means it was opened. Produces the chat checkmarks.</td></tr>
+  <tr><td class="mono">Mode 4 Shape({k}) {call} '{name}'</td><td>A drawing (0 = circle, otherwise polygon/polyline) named {name}.</td></tr>
+  <tr><td class="mono">Mode 5 CASEVAC {call} '{name}'</td><td>A medical-evacuation request titled {name}.</td></tr>
+  <tr><td class="mono">Mode 6 Marker {type} {call} '{name}' @ {lat},{lon}</td><td>A full marker with its exact CoT type and icon (section 5.2, Mode 6).</td></tr>
+</table>
+<div class="plain"><b>Rule of thumb:</b> the Activity Log answers &ldquo;what is the plugin
+doing and why?&rdquo; (including everything it decided <i>not</i> to send); the Decodes log
+answers &ldquo;what have I actually received?&rdquo;</div>
 
 <h2>7. Timing Parameters and Constants</h2>
 <table>
@@ -509,7 +620,7 @@ in <code>HbcPlugin.java</code> plus <code>res/layout/main_layout.xml</code>. The
 <code>codec-test/</code> programs run on an ordinary computer (no phone needed) and prove the
 byte formats match this document.</div>
 
-<div class="footer">HBC Radio ICD &nbsp;Version 1.1 &nbsp;|&nbsp; Aug 2026 &nbsp;|&nbsp; KE8TQB &nbsp;|&nbsp; github.com/ke8tqb/HBC-ATAK-Plugin</div>
+<div class="footer">HBC Radio ICD &nbsp;Version 1.2 &nbsp;|&nbsp; Aug 2026 &nbsp;|&nbsp; KE8TQB &nbsp;|&nbsp; github.com/ke8tqb/HBC-ATAK-Plugin</div>
 
 </body>
 </html>
