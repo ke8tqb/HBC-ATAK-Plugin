@@ -20,8 +20,13 @@
   th { background: #e8e8e8; }
   code, .mono { font-family: Consolas, "Courier New", monospace; font-size: 9.5pt; }
   .note { background: #f2f2f2; border-left: 4px solid #666; padding: 6px 10px; margin: 0.8em 0; font-size: 10.5pt; }
+  .plain { background: #eef5ee; border-left: 4px solid #4a7d4a; padding: 6px 10px; margin: 0.8em 0; font-size: 10.5pt; }
+  .figure { text-align: center; margin: 1em 0 1.2em 0; page-break-inside: avoid; }
+  .figure img { max-width: 6.4in; border: 1px solid #999; }
+  .figure .cap { font-size: 10pt; color: #444; margin-top: 4px; font-style: italic; }
   .footer { margin-top: 2.5em; padding-top: 6px; border-top: 1px solid #bbb; font-size: 9.5pt; color: #555; text-align: center; }
   .pagebreak { page-break-before: always; }
+  .tree { font-family: Consolas, "Courier New", monospace; font-size: 9pt; white-space: pre; background: #f7f7f7; border: 1px solid #ccc; padding: 8px 12px; line-height: 1.35; }
 </style>
 </head>
 <body>
@@ -30,7 +35,7 @@
   <h1>HBC RADIO</h1>
   <div class="sub">ATAK Plugin &mdash; Interface Control Document</div>
   <div class="sub">Ham Binary CoT over Distance-Vector Mesh Radio</div>
-  <div class="contact">KE8TQB &nbsp;|&nbsp; github.com/ke8tqb/HBC-ATAK-Plugin</div>
+  <div class="contact">Version 1.1 &nbsp;|&nbsp; KE8TQB &nbsp;|&nbsp; github.com/ke8tqb/HBC-ATAK-Plugin</div>
 </div>
 
 <div class="toc">
@@ -43,7 +48,7 @@
       <li>3.1 &nbsp;AFSK1200 / AX.25</li>
       <li>3.2 &nbsp;OFDM COFDMTV (rattlegram)</li>
       <li>3.3 &nbsp;Mercury HF (FreeDV DATAC4)</li>
-      <li>3.4 &nbsp;Channel Access (CSMA)</li>
+      <li>3.4 &nbsp;Channel Access (CSMA) &mdash; taking turns on the air</li>
     </ol>
   </li>
   <li>Mesh Network Layer
@@ -68,103 +73,133 @@
       <li>5.5 &nbsp;Contact Publication</li>
     </ol>
   </li>
+  <li>User Interface Reference (Screenshots)</li>
   <li>Timing Parameters and Constants</li>
   <li>Compatibility and Constraints</li>
+  <li>Glossary</li>
   <li>References</li>
 </ol>
+<p>Appendix A &mdash; GitHub Repository File Structure</p>
 </div>
 
 <h2>1. Overview</h2>
-<p>HBC Radio is an ATAK plugin that transmits Cursor-on-Target (CoT) situational-awareness
-data between EUDs over amateur-radio audio links, with no network infrastructure. The stack
-has three interfaces, each specified in this document:</p>
+<p>HBC Radio is a plugin (an add-on) for ATAK, the Android Team Awareness Kit mapping app.
+It lets ATAK devices share map information &mdash; positions, markers, chat messages, and
+alerts &mdash; using ordinary handheld ham radios instead of the internet or a cell network.
+The phone plays specially coded sound into the radio; another phone hears that sound on its
+radio and turns it back into map data.</p>
+<p>The system is built in three layers, like a stack of responsibilities. Each layer is
+specified in its own section of this document:</p>
 <ul>
-  <li><b>Physical layer</b> — one of three selectable audio modems (AFSK1200, OFDM COFDMTV, or
-      Mercury HF / FreeDV DATAC4) carrying opaque byte frames over a voice radio.</li>
-  <li><b>Mesh network layer</b> — an uncoordinated distance-vector routing protocol (announce
-      propagation, hop-by-hop directs, end-to-end ACKs) adapted from the Reticulum routing
-      model for unencrypted FCC Part 97 operation.</li>
-  <li><b>Application layer</b> — the HBC Protocol v1.6, a compact bit-packed binary encoding
-      of CoT events (PLI, markers, chat, alerts, shapes, CASEVAC).</li>
+  <li><b>Physical layer (Section 3)</b> — the &ldquo;voice&rdquo; of the system: one of three
+      selectable audio modems that turn bytes into sound and back.</li>
+  <li><b>Mesh network layer (Section 4)</b> — the &ldquo;postal service&rdquo;: it figures out
+      who can hear whom and can pass a message through a middle station to reach someone out
+      of range. Based on a published distance-vector routing design (see References).</li>
+  <li><b>Application layer (Section 5)</b> — the &ldquo;language&rdquo;: the HBC Protocol,
+      which squeezes a map event into a few dozen bytes so it can be sent quickly over a
+      slow radio link.</li>
 </ul>
-<div class="note"><b>NOTE:</b> All content is transmitted in cleartext. Callsigns ride in every
-frame header, satisfying station-identification requirements.</div>
+<div class="plain"><b>In plain terms:</b> HBC (the language) writes a very short letter,
+the mesh (the postal service) addresses it and picks the route, and the modem (the voice)
+reads it out loud over the radio.</div>
+<div class="note"><b>NOTE:</b> Everything is transmitted unencrypted (in the clear), as
+required by amateur-radio rules (FCC Part 97). The operator&rsquo;s callsign is inside every
+transmission, which satisfies station-identification requirements.</div>
 
 <h2>2. System Architecture</h2>
-<p>Data path for one transmission:</p>
-<p class="mono">ATAK CoT event &rarr; HBC encoder (binary payload) &rarr; MeshRouter (13+ byte
-header, routing) &rarr; modem framing &rarr; audio &rarr; radio (VOX or PTT)</p>
-<p>Reception is the mirror image. The mesh layer decides whether a received frame is delivered
-locally, forwarded toward its destination, rebroadcast (announces), or dropped.</p>
+<p>The path one message takes from your screen to the other station&rsquo;s screen:</p>
+<p class="mono">ATAK map event &rarr; HBC encoder (shrinks it to bytes) &rarr; MeshRouter
+(adds addressing) &rarr; modem (turns bytes into audio) &rarr; radio &rarr; ...air... &rarr;
+radio &rarr; modem &rarr; MeshRouter &rarr; HBC decoder &rarr; ATAK map</p>
+<p>On receive, the mesh layer decides what to do with each frame: deliver it to this device,
+forward it toward its destination, rebroadcast it (announces), or ignore it.</p>
 <table>
-  <tr><th>Layer</th><th>Implementation</th><th>Addressing</th></tr>
-  <tr><td>Application</td><td>HbcEncoder / HbcDecoder</td><td>Callsign in HBC header; deterministic UIDs</td></tr>
-  <tr><td>Network</td><td>MeshRouter</td><td>Origin / Transmitter / Destination / Next-hop callsigns (ITA2)</td></tr>
-  <tr><td>Physical</td><td>AudioModem, OfdmModem, MercuryModem</td><td>None (byte pipe; AFSK carries fixed AX.25 wrapper for station ID)</td></tr>
+  <tr><th>Layer</th><th>Code that implements it</th><th>How things are addressed</th></tr>
+  <tr><td>Application</td><td>HbcEncoder / HbcDecoder</td><td>Callsign inside the HBC header; predictable UIDs (section 5.3)</td></tr>
+  <tr><td>Network</td><td>MeshRouter</td><td>Origin / Transmitter / Destination / Next-hop callsigns</td></tr>
+  <tr><td>Physical</td><td>AudioModem, OfdmModem, MercuryModem</td><td>None &mdash; just a byte pipe (AFSK adds a fixed AX.25 wrapper for station ID)</td></tr>
 </table>
 
 <h2>3. Physical Layer (Audio Modems)</h2>
-<p>All three modems carry the identical mesh frame; the modem must match on all stations
-sharing a channel.</p>
+<p>A modem converts bytes into sound and sound back into bytes. HBC Radio offers three, each
+suited to different radios and conditions. All three carry the exact same mesh frame, but
+they are not compatible with each other &mdash; <b>every station on a channel must select
+the same modem</b> (Figure 3).</p>
 <table>
   <tr><th>Parameter</th><th>AFSK1200</th><th>OFDM COFDMTV</th><th>Mercury HF</th></tr>
   <tr><td>Waveform</td><td>Bell 202 AFSK, 1200 baud</td><td>QPSK OFDM (rattlegram &ldquo;short&rdquo;), 1600 Hz BW</td><td>FreeDV DATAC4 raw-data OFDM (codec2)</td></tr>
   <tr><td>Sample rate</td><td>48000 Hz</td><td>48000 Hz</td><td>8000 Hz</td></tr>
   <tr><td>Payload capacity per burst</td><td>Practical AX.25 limits (&gt;200 B)</td><td>169 B</td><td>52 B (54 B frame minus framing)</td></tr>
-  <tr><td>FEC / integrity</td><td>HDLC CRC-16</td><td>Polar code + CRC-32</td><td>LDPC + CRC-16</td></tr>
-  <tr><td>Intended use</td><td>VHF/UHF FM, packet compatible</td><td>VHF/UHF FM, robust to device DSP</td><td>HF SSB, very low SNR</td></tr>
+  <tr><td>Error protection</td><td>HDLC CRC-16 (detect only)</td><td>Polar code + CRC-32</td><td>LDPC + CRC-16</td></tr>
+  <tr><td>Best for</td><td>VHF/UHF FM; compatible with classic packet radio</td><td>VHF/UHF FM; survives phone audio processing</td><td>HF SSB; works at very weak signal levels</td></tr>
 </table>
 
 <h3>3.1 AFSK1200 / AX.25</h3>
-<p>Mesh frames are carried as the information field of a single AX.25 UI frame. The AX.25
-addresses are fixed PHY framing only and are not used for routing: destination
-<code>HBC</code>, source = operator ham callsign (Part 97 ID), no digipeater path. TX renders
-the entire burst in advance: lead silence (150 ms), optional VOX leader tone, HDLC flag
-preamble (&ldquo;TX Dwell&rdquo;, default 500 ms), frame, tail silence (250 ms).</p>
+<p>The classic 1980s packet-radio sound (two alternating tones, 1200 bits per second). Mesh
+frames ride inside a single AX.25 &ldquo;UI&rdquo; frame. The AX.25 addresses are only
+wrapping paper &mdash; they are not used for routing: destination is always
+<code>HBC</code>, source is the operator&rsquo;s ham callsign (which doubles as the legal
+station ID), and no digipeater path is used. Each transmission is rendered in advance as:
+lead-in silence (150 ms) &rarr; optional VOX leader tone &rarr; HDLC flag preamble
+(&ldquo;TX Dwell,&rdquo; default 500 ms) &rarr; the frame &rarr; tail silence (250 ms).</p>
 
 <h3>3.2 OFDM COFDMTV (rattlegram)</h3>
-<p>Payload framing inside the 170-byte OFDM block: byte 0 = mesh frame length (1&ndash;169),
-bytes 1..n = mesh frame, zero-padded. The operator callsign also rides in the OFDM metadata
-header. Carrier 1500 Hz; VOX leader implemented as noise symbols (~180 ms each).</p>
+<p>A modern, robust waveform that packs data onto many small carriers at once. Framing inside
+the 170-byte block: byte 0 = mesh frame length (1&ndash;169), bytes 1..n = the mesh frame,
+zero-padded. The operator callsign also rides in the waveform&rsquo;s own metadata header.
+Audio carrier is 1500 Hz; the VOX leader is made of noise symbols (~180 ms each).</p>
 
 <h3>3.3 Mercury HF (FreeDV DATAC4)</h3>
-<p>Burst layout matches the Mercury HF modem exactly: preamble &rarr; one DATAC4 frame with
-CRC-16 in the final two bytes &rarr; postamble, with 100 ms head/tail silence. Payload framing
-inside the 54-byte usable frame: byte 0 = length, byte 1 = <code>'H'</code> domain marker,
-bytes 2..n = mesh frame, zero-padded.</p>
-<div class="note"><b>NOTE:</b> This interface speaks Mercury&rsquo;s waveform/frame/CRC layout,
-not Mercury&rsquo;s ARQ data-link protocol. Desktop Mercury demodulates these frames but does
-not route them to its TCP interface.</div>
+<p>Designed for long-range HF radio, where signals are weak and distorted. The burst layout
+matches the Mercury HF modem exactly: preamble &rarr; one DATAC4 data frame with a CRC-16
+checksum in its last two bytes &rarr; postamble, with 100 ms of silence on each end. Framing
+inside the 54 usable bytes: byte 0 = length, byte 1 = the letter <code>'H'</code> (a marker
+that says &ldquo;this is HBC traffic&rdquo;), bytes 2..n = the mesh frame, zero-padded.</p>
+<div class="note"><b>NOTE:</b> This speaks Mercury&rsquo;s <i>waveform</i>, not
+Mercury&rsquo;s higher-level ARQ data-link protocol. A desktop Mercury installation can
+demodulate these bursts but will not pass them to its TCP data port.</div>
 
-<h3>3.4 Channel Access (CSMA)</h3>
-<p>Every modem performs carrier-sense multiple access before transmitting: RX audio energy is
-tracked against an adaptive noise floor (busy above 4&times; floor, held 400 ms past the last
-loud chunk). Before TX the station waits for a clear channel plus a random 150&ndash;550 ms
-backoff that must remain clear; after 8 s (15 s on Mercury) the frame is sent regardless so
-traffic cannot be starved. AFSK additionally uses the demodulator&rsquo;s DCD as a second
-carrier-sense input.</p>
+<h3>3.4 Channel Access (CSMA) &mdash; taking turns on the air</h3>
+<p>Only one station can talk on a radio channel at a time; two at once garble both
+(a &ldquo;collision&rdquo;). Before transmitting, every modem <i>listens first</i>: incoming
+audio energy is compared against an automatically learned background-noise level, and the
+channel counts as busy when audio is 4&times; louder than that background (held for 400 ms
+past the last loud moment so brief gaps inside someone&rsquo;s transmission don&rsquo;t look
+like free air). When the channel goes quiet, the station still waits a random 150&ndash;550 ms
+&mdash; so two stations that were both waiting don&rsquo;t key up at the same instant. After
+8 seconds of continuous busy (15 s on Mercury) the frame is sent anyway so traffic can never
+be blocked forever. AFSK also uses its demodulator&rsquo;s data-carrier-detect as a second
+&ldquo;someone is talking&rdquo; signal.</p>
 
 <div class="pagebreak"></div>
 <h2>4. Mesh Network Layer</h2>
 <p>Implements &ldquo;Adaptation of Uncoordinated Distance-Vector Routing for Unencrypted
 Amateur Radio Networks&rdquo; (see References), with one approved deviation: packet payloads
-carry HBC binary rather than ITA2 text.</p>
+carry compact HBC binary rather than ITA2 text.</p>
+<div class="plain"><b>In plain terms:</b> every station keeps a simple address book
+(&ldquo;to reach DAVE, hand the message to BOB&rdquo;). The address book is built just by
+listening, and messages for far-away stations get passed station-to-station like a relay
+race.</div>
 
 <h3>4.1 Common Packet Header (13 bytes)</h3>
+<p>Every mesh packet starts with the same 13 bytes:</p>
 <table>
   <tr><th>Byte offset</th><th>Length</th><th>Field</th><th>Description</th></tr>
   <tr><td>0</td><td>1</td><td>Packet Type</td><td>0x01 Announce, 0x02 Broadcast, 0x03 Direct, 0x04 ACK</td></tr>
-  <tr><td>1</td><td>5</td><td>Origin Callsign</td><td>Bit-packed ITA2 (section 4.2). The station that created the packet.</td></tr>
-  <tr><td>6</td><td>5</td><td>Transmitter Callsign</td><td>The station transmitting this specific hop; rewritten by relays.</td></tr>
-  <tr><td>11</td><td>2</td><td>Sequence ID</td><td>Unsigned 16-bit, big-endian. Loop prevention (section 4.8).</td></tr>
+  <tr><td>1</td><td>5</td><td>Origin Callsign</td><td>Who originally created the packet (bit-packed ITA2, section 4.2)</td></tr>
+  <tr><td>6</td><td>5</td><td>Transmitter Callsign</td><td>Who is transmitting this particular hop; each relay overwrites it with its own callsign</td></tr>
+  <tr><td>11</td><td>2</td><td>Sequence ID</td><td>A 16-bit counter value (big-endian) used to recognize duplicates (section 4.8)</td></tr>
 </table>
 
 <h3>4.2 Callsign Encoding (ITA2, 5 bytes)</h3>
-<p>Callsign fields are exactly 8 five-bit ITA2 codes bit-packed MSB-first into 5 bytes
-(40 bits), NULL (<code>00000</code>) padded. Shifts: LTRS = <code>11111</code>, FIGS =
-<code>11011</code>. A leading LTRS is emitted before the first letter; when a callsign would
-need 9 codes (e.g. <code>KE8TQB</code>), the leading LTRS is omitted &mdash; decoders start in
-letters state, so both forms decode identically.</p>
+<p>Callsigns are stored in an old teletype alphabet called ITA2, which uses only 5 bits per
+character instead of 8 &mdash; so 8 characters fit in exactly 5 bytes (40 bits). Two special
+&ldquo;shift&rdquo; codes switch between letters (LTRS = <code>11111</code>) and figures/digits
+(FIGS = <code>11011</code>); unused positions are filled with NULL (<code>00000</code>).
+A leading LTRS is written before the first letter; if a callsign would need 9 codes (for
+example <code>KE8TQB</code>), the leading LTRS is dropped &mdash; decoders start in letters
+mode anyway, so both forms read back identically.</p>
 <table>
   <tr><th>Example</th><th>Code sequence</th><th>Packed bytes (hex)</th></tr>
   <tr><td>K1ABC</td><td>LTRS K FIGS 1 LTRS A B C</td><td class="mono">FF B7 DF E2 6E</td></tr>
@@ -172,77 +207,90 @@ letters state, so both forms decode identically.</p>
   <tr><td>W2XYZ</td><td>LTRS W FIGS 2 LTRS X Y Z</td><td class="mono">FE 77 9F DE B1</td></tr>
 </table>
 <div class="note"><b>NOTE:</b> The source paper&rsquo;s K1ABC example lists byte 03 as
-<code>BF</code>, but its own bit-level breakdown evaluates to <code>DF</code>; this
-implementation follows the arithmetic. All vectors above are enforced by the automated
-test suite (codec-test/MeshRouterTest.java).</div>
+<code>BF</code>, but the paper&rsquo;s own bit-by-bit math works out to <code>DF</code>; this
+implementation follows the math. All three vectors above are locked in by the automated test
+suite (<code>codec-test/MeshRouterTest.java</code>).</div>
 
 <h3>4.3 Packet Type 0x01 — Announce (14 bytes)</h3>
+<p>A tiny &ldquo;I exist and here&rsquo;s how far away I am&rdquo; packet that builds
+everyone&rsquo;s address book.</p>
 <table>
   <tr><th>Byte offset</th><th>Length</th><th>Field</th><th>Description</th></tr>
   <tr><td>0&ndash;12</td><td>13</td><td>Common Header</td><td>Type = 0x01</td></tr>
-  <tr><td>13</td><td>1</td><td>Hop Count</td><td>Unsigned 8-bit; origin sets 0, each relay increments</td></tr>
+  <tr><td>13</td><td>1</td><td>Hop Count</td><td>How many relays the announce has passed through; the origin sets 0, each relay adds 1</td></tr>
 </table>
 
 <h3>4.4 Packet Type 0x02 — Broadcast (13 + n bytes)</h3>
+<p>A message to everyone in earshot. Not relayed, not acknowledged.</p>
 <table>
   <tr><th>Byte offset</th><th>Length</th><th>Field</th><th>Description</th></tr>
   <tr><td>0&ndash;12</td><td>13</td><td>Common Header</td><td>Type = 0x02</td></tr>
-  <tr><td>13+</td><td>variable</td><td>Payload</td><td>HBC binary message (section 5). Unrouted, unacknowledged.</td></tr>
+  <tr><td>13+</td><td>variable</td><td>Payload</td><td>One HBC message (section 5)</td></tr>
 </table>
 
 <h3>4.5 Packet Type 0x03 — Direct Message (23 + n bytes)</h3>
+<p>A message for one specific station, passed hop-by-hop.</p>
 <table>
   <tr><th>Byte offset</th><th>Length</th><th>Field</th><th>Description</th></tr>
   <tr><td>0&ndash;12</td><td>13</td><td>Common Header</td><td>Type = 0x03</td></tr>
-  <tr><td>13</td><td>5</td><td>Destination Callsign</td><td>Final recipient (ITA2)</td></tr>
-  <tr><td>18</td><td>5</td><td>Next Hop Callsign</td><td>Neighbor receiving this hop (ITA2); rewritten by each relay</td></tr>
-  <tr><td>23+</td><td>variable</td><td>Payload</td><td>HBC binary message</td></tr>
+  <tr><td>13</td><td>5</td><td>Destination Callsign</td><td>The final recipient</td></tr>
+  <tr><td>18</td><td>5</td><td>Next Hop Callsign</td><td>The neighbor being asked to carry this hop; each relay rewrites it</td></tr>
+  <tr><td>23+</td><td>variable</td><td>Payload</td><td>One HBC message</td></tr>
 </table>
-<p>A station whose callsign matches Next Hop looks the destination up in its routing table,
-rewrites Next Hop and Transmitter, and re-transmits. The final destination delivers the
-payload and returns an ACK. With no route, the packet is dropped (relays) or sent as a
-Broadcast fallback (originator).</p>
+<p>A station that sees its own callsign in Next Hop looks the Destination up in its address
+book, writes in the next station&rsquo;s callsign, and re-transmits. The final destination
+delivers the payload and answers with an ACK (section 4.6). If nobody knows a route, a relay
+drops the packet; the original sender instead falls back to sending it as a Broadcast.</p>
 
 <h3>4.6 Packet Type 0x04 — Acknowledgment (20 bytes)</h3>
+<p>The &ldquo;got it!&rdquo; receipt for a Direct message, sent back to the original
+sender.</p>
 <table>
   <tr><th>Byte offset</th><th>Length</th><th>Field</th><th>Description</th></tr>
-  <tr><td>0&ndash;12</td><td>13</td><td>Common Header</td><td>Type = 0x04. Origin = acknowledging station.</td></tr>
-  <tr><td>13</td><td>5</td><td>Destination Callsign</td><td>Origin of the Direct being acknowledged</td></tr>
-  <tr><td>18</td><td>2</td><td>Acked Sequence ID</td><td>Sequence ID of the confirmed Direct (big-endian)</td></tr>
+  <tr><td>0&ndash;12</td><td>13</td><td>Common Header</td><td>Type = 0x04. Origin = the station acknowledging.</td></tr>
+  <tr><td>13</td><td>5</td><td>Destination Callsign</td><td>The Origin of the Direct being acknowledged</td></tr>
+  <tr><td>18</td><td>2</td><td>Acked Sequence ID</td><td>The Sequence ID of the Direct being confirmed</td></tr>
 </table>
-<p>Intermediate stations forward ACKs toward the destination when a route is known; the dedup
-cache prevents forwarding storms.</p>
+<p>Stations along the way forward ACKs toward their destination when they know a route; the
+duplicate cache (section 4.8) keeps that from snowballing.</p>
 
 <h3>4.7 Route Discovery and Maintenance</h3>
 <ul>
-  <li><b>Announce propagation</b> — unseen announces are rebroadcast with hops+1 and the local
-      callsign as Transmitter; receivers record Destination = Origin, Next hop = Transmitter.
-      Lowest hop count wins; equal-cost ties resolve &ldquo;first heard.&rdquo;</li>
-  <li><b>Passive learning</b> — hearing <i>any</i> valid frame registers its Transmitter as a
-      0-hop neighbor and (for non-announce frames) the Origin as reachable via that
-      Transmitter. A single received PLI is sufficient to make a station addressable.</li>
-  <li><b>Announce-on-traffic</b> — a station&rsquo;s own transmissions serve as its announce;
-      an explicit Announce is sent only after 10 minutes with no transmissions (keepalive).</li>
-  <li><b>Expiration</b> — routing entries expire 30 minutes after the last frame that
-      refreshed them; cleanup runs every 60 s.</li>
+  <li><b>Announce propagation</b> — when a station hears a new Announce, it writes the entry
+      &ldquo;Origin is reachable via whoever just transmitted this&rdquo; and re-broadcasts
+      the announce with hop count + 1. Shorter routes (fewer hops) replace longer ones; ties
+      go to whichever route was heard first.</li>
+  <li><b>Passive learning</b> — hearing <i>any</i> valid frame is proof of a path, so the
+      transmitting station is recorded as a direct neighbor, and (for non-announce frames)
+      the originating station is recorded as reachable through that transmitter. Hearing a
+      single position report is enough to be able to send to that station.</li>
+  <li><b>Announce-on-traffic</b> — a station&rsquo;s own transmissions do the announcing for
+      it; an explicit Announce packet only goes out after 10 quiet minutes, as a
+      keepalive.</li>
+  <li><b>Expiration</b> — address-book entries are erased 30 minutes after the last frame
+      that refreshed them (stations move and links change); a cleanup pass runs every 60 s.</li>
 </ul>
 
 <h3>4.8 Loop Prevention</h3>
-<p>Receivers cache <code>[Origin + Sequence ID + Type]</code> signatures for 5 minutes. A
-packet whose signature is cached is silently discarded (except a duplicate Direct addressed
-to this station, which is re-ACKed without re-delivery to survive a lost ACK).</p>
+<p>Without protection, a rebroadcast message could bounce between stations forever. Each
+receiver therefore remembers <code>[Origin + Sequence ID + Type]</code> combinations for
+5 minutes; a packet it has already seen is silently ignored. One deliberate exception: a
+duplicate Direct addressed <i>to this station</i> gets a fresh ACK (but is not delivered
+twice) &mdash; that covers the case where the first ACK was lost on the air.</p>
 
 <h3>4.9 Reliability and Retries</h3>
-<p>Directs operate fire-and-wait: the originator starts a retry timer of 5 s plus 0&ndash;2 s
-random jitter. If no ACK arrives, the Direct is re-transmitted with the <b>same</b> Sequence
-ID, up to 3 retries, after which the transmission is declared failed (logged). Broadcasts are
-never acknowledged or retried.</p>
+<p>Directs work &ldquo;fire and wait&rdquo;: after sending, the originator waits 5 s (plus a
+random 0&ndash;2 s) for the ACK. No ACK &rarr; send it again <b>with the same Sequence
+ID</b>, up to 3 retries, then declare it failed and log it. Broadcasts are never acknowledged
+or retried.</p>
 
 <div class="pagebreak"></div>
 <h2>5. Application Layer (HBC Protocol v1.6)</h2>
-<p>The payload of every Broadcast/Direct is one HBC message: a bit-packed binary encoding of a
-CoT event. Full field-level definitions and worked byte examples are maintained in the
-HBC-Protocol repository (see References); this section summarizes the interface.</p>
+<p>The payload inside every Broadcast/Direct is one HBC message: a map event squeezed into as
+few bytes as possible by packing values bit-by-bit instead of sending bulky XML text. (For
+scale: a normal ATAK position report is roughly 1&ndash;2 <i>thousand</i> bytes of XML; the
+HBC version is about 15 bytes.) Full field-level definitions and worked byte examples live in
+the HBC-Protocol repository (see References); this section summarizes the interface.</p>
 
 <h3>5.1 HBC Header</h3>
 <table>
@@ -251,72 +299,146 @@ HBC-Protocol repository (see References); this section summarizes the interface.
   <tr><td>Version</td><td>3 bits</td><td><code>000</code> = version 1</td></tr>
   <tr><td>Mode</td><td>3 bits</td><td>mode&minus;1 for Modes 1&ndash;6; <code>111</code> = Mode 0 Ack</td></tr>
 </table>
-<div class="note"><b>NOTE:</b> HBC uses its own ITA2 table (LSB-first relative to the mesh
-header table) with CR terminators &mdash; the two layers&rsquo; callsign encodings are related
-but not interchangeable.</div>
+<div class="note"><b>NOTE:</b> HBC uses its own ITA2 table (bit-reversed relative to the mesh
+header&rsquo;s table) and marks the end of text with a CR code instead of padding to a fixed
+size. The two layers&rsquo; callsign encodings are cousins, not twins &mdash; they are not
+interchangeable.</div>
 
 <h3>5.2 Message Modes and Sizes</h3>
 <table>
-  <tr><th>Mode</th><th>CoT type(s)</th><th>Content</th><th>Typical size</th></tr>
-  <tr><td>0 &nbsp;Ack</td><td>b-t-f-d / b-t-f-r</td><td>DM delivered/read receipt: recipient callsign, kind (2 b), 16-bit tag</td><td>~12 B</td></tr>
-  <tr><td>1 &nbsp;PLI / Spot</td><td>a-f-G, a-h-G, a-n-G, a-u-G</td><td>Spot flag, affiliation (2 b), name (7 ch), lat/lon (21+22 b)</td><td>~15 B</td></tr>
-  <tr><td>2 &nbsp;Alert</td><td>b-a-o-tbl / b-a-o-can</td><td>Active flag, alert + originator names, position</td><td>~18 B</td></tr>
-  <tr><td>3 &nbsp;GeoChat</td><td>b-t-f</td><td>Destination kind (2 b: All / Room / DM), room or recipient, DM 16-bit tag, ITA2 text</td><td>DM &ldquo;helo landing zone&rdquo; = 23 B</td></tr>
-  <tr><td>4 &nbsp;Shape</td><td>u-d-c-c / u-d-r / u-d-f</td><td>Circle (center + radius) or polygon/polyline (&le;15 points)</td><td>varies</td></tr>
-  <tr><td>5 &nbsp;CASEVAC</td><td>b-r-f-h-c</td><td>MEDEVAC 9-line summary fields</td><td>~20 B</td></tr>
-  <tr><td>6 &nbsp;Extended Marker</td><td>any placed marker</td><td>Full CoT type token, 2525C/spot-map/custom icon reference, color tint</td><td>varies</td></tr>
+  <tr><th>Mode</th><th>CoT type(s)</th><th>What it carries</th><th>Typical size</th></tr>
+  <tr><td>0 &nbsp;Ack</td><td>b-t-f-d / b-t-f-r</td><td>Chat delivered/read receipt: recipient callsign, kind (2 bits), 16-bit tag</td><td>~12 B</td></tr>
+  <tr><td>1 &nbsp;PLI / Spot</td><td>a-f-G, a-h-G, a-n-G, a-u-G</td><td>Position report: spot flag, affiliation (2 bits), name (7 chars), latitude/longitude (21+22 bits)</td><td>~15 B</td></tr>
+  <tr><td>2 &nbsp;Alert</td><td>b-a-o-tbl / b-a-o-can</td><td>911 emergency: active flag, alert + originator names, position</td><td>~18 B</td></tr>
+  <tr><td>3 &nbsp;GeoChat</td><td>b-t-f</td><td>Text message: destination kind (All / Room / DM), room or recipient, DM 16-bit tag, ITA2 text</td><td>DM &ldquo;helo landing zone&rdquo; = 23 B</td></tr>
+  <tr><td>4 &nbsp;Shape</td><td>u-d-c-c / u-d-r / u-d-f</td><td>Drawing: circle (center + radius) or polygon/polyline (&le;15 points)</td><td>varies</td></tr>
+  <tr><td>5 &nbsp;CASEVAC</td><td>b-r-f-h-c</td><td>Medical evacuation request (9-line summary fields)</td><td>~20 B</td></tr>
+  <tr><td>6 &nbsp;Extended Marker</td><td>any placed marker</td><td>Full CoT type token, icon reference (2525C / spot-map / custom), color tint</td><td>varies</td></tr>
 </table>
 
 <h3>5.3 Deterministic UIDs</h3>
+<p>ATAK identifies every map object by a UID (unique ID string). HBC does not transmit UIDs
+&mdash; both ends compute the same one from the callsign, so a station&rsquo;s position marker
+updates in place instead of piling up duplicates:</p>
 <table>
   <tr><th>Object</th><th>UID rule</th></tr>
-  <tr><td>PLI marker</td><td><code>HBC-{CALLSIGN}</code></td></tr>
+  <tr><td>Position (PLI) marker</td><td><code>HBC-{CALLSIGN}</code></td></tr>
   <tr><td>911 alert</td><td><code>HBC-{CALLSIGN}-911</code></td></tr>
-  <tr><td>DM conversation</td><td>Recipient&rsquo;s UID; the receiving plugin substitutes its real ATAK device UID so the message files into the chat window</td></tr>
-  <tr><td>Spots / shapes / markers</td><td>Random UUID per injection</td></tr>
+  <tr><td>DM conversation</td><td>Recipient&rsquo;s UID; the receiving plugin swaps in its real ATAK device UID so the message lands in the right chat window</td></tr>
+  <tr><td>Spots / shapes / markers</td><td>Random UUID each time one is received</td></tr>
 </table>
 
 <h3>5.4 Direct-Message Tags and Receipts</h3>
-<p>Every chat DM carries a 16-bit tag = CRC-16/CCITT-FALSE (poly 0x1021, init 0xFFFF) of the
-ATAK <code>messageId</code>. The receiving EUD&rsquo;s automatic delivered/read receipts are
-converted to Mode 0 Acks echoing that tag; the sender maps the tag back to the original
-messageId and injects the receipt CoT, producing ATAK&rsquo;s delivered/read checkmarks
-end-to-end over RF. These application receipts are independent of the mesh-layer ACKs of
-section 4.6.</p>
+<p>Every chat DM carries a 16-bit tag &mdash; a CRC-16/CCITT-FALSE checksum (polynomial
+0x1021, initial value 0xFFFF) of ATAK&rsquo;s internal <code>messageId</code>. When the
+recipient&rsquo;s ATAK automatically generates its delivered/read receipts, the plugin
+converts them into tiny Mode 0 Acks that echo the tag back over the air; the sender matches
+the tag to the original messageId and injects the receipt, so ATAK&rsquo;s familiar
+delivered/read checkmarks work end-to-end over radio. These application-level receipts are
+separate from (and in addition to) the mesh-layer ACKs of section 4.6.</p>
 
 <h3>5.5 Contact Publication</h3>
-<p>Received PLIs are reconstructed with <code>&lt;contact callsign="..."
-endpoint="*:-1:stcp"/&gt;</code> and a <code>&lt;__group&gt;</code> detail, so ATAK registers
-the heard station as a messageable contact (chat DM list, send-to pickers) from a single PLI.
-Outgoing traffic to that contact is intercepted by the plugin&rsquo;s PreSendProcessor and
-transmitted over the mesh.</p>
+<p>ATAK only lists a station in its chat/contact pickers when that station&rsquo;s position
+report includes a network &ldquo;endpoint.&rdquo; Received PLIs are therefore reconstructed
+with <code>&lt;contact callsign="..." endpoint="*:-1:stcp"/&gt;</code> and a
+<code>&lt;__group&gt;</code> team entry, so hearing a single position report makes the
+station selectable for chat and file/point sends. Outgoing traffic to that contact is
+intercepted by the plugin and transmitted over the mesh.</p>
 
-<h2>6. Timing Parameters and Constants</h2>
+<div class="pagebreak"></div>
+<h2>6. User Interface Reference (Screenshots)</h2>
+<p>All configuration lives in one pane, opened from the HBC toolbar icon. The figures below
+show each control described in this document.</p>
+
+<div class="figure">
+  <img src="images/fig1_settings_pane.jpg" alt="HBC settings pane">
+  <div class="cap">Figure 1 &mdash; The Settings tab: link status (STOPPED) with the
+  &ldquo;Next PLI&rdquo; countdown beneath it, ham callsign entry, the Send-to destination
+  selector, and the TX Dwell / VOX Lead / PLI rate timing fields (sections 3.1, 3.4, 4.7).</div>
+</div>
+
+<div class="figure">
+  <img src="images/fig2_send_to.jpg" alt="Send-to selector">
+  <div class="cap">Figure 2 &mdash; The Send-to selector expanded. &ldquo;Broadcast
+  (everyone)&rdquo; is the default; every station learned by the mesh (section 4.7) is added
+  to this list automatically and can be chosen as a routed Direct destination for
+  markers/points.</div>
+</div>
+
+<div class="figure">
+  <img src="images/fig3_modem_select.jpg" alt="Modem selection">
+  <div class="cap">Figure 3 &mdash; Modem selection (section 3): AFSK1200/AX.25, OFDM
+  COFDMTV, or Mercury HF (FreeDV DATAC4). All stations on a channel must choose the same
+  modem.</div>
+</div>
+
+<div class="figure">
+  <img src="images/fig4_tx_stream.jpg" alt="TX audio stream selection">
+  <div class="cap">Figure 4 &mdash; TX audio stream selection. &ldquo;Alarm&rdquo; is the
+  default because it bypasses phone media effects (EQ, spatial audio) that can distort modem
+  tones; the alternatives exist for devices that behave differently.</div>
+</div>
+
+<div class="figure">
+  <img src="images/fig5_msg_types.jpg" alt="Message type filters and start button">
+  <div class="cap">Figure 5 &mdash; Transmit/Receive master switches, the per-type transmit
+  filters (PLI, Spots, Alerts, Chat, Shapes, CASEVAC &mdash; the HBC modes of section 5.2),
+  the Start Radio Link button, and the Activity Log.</div>
+</div>
+
+<div class="figure">
+  <img src="images/fig6_decodes.jpg" alt="Packet decodes tab">
+  <div class="cap">Figure 6 &mdash; The Decodes tab: a running log of every packet
+  successfully received and decoded, with sender, mode, and payload size.</div>
+</div>
+
+<h2>7. Timing Parameters and Constants</h2>
 <table>
   <tr><th>Parameter</th><th>Value</th><th>Layer</th></tr>
   <tr><td>Route entry TTL</td><td>30 min (refreshed by any heard frame)</td><td>Mesh</td></tr>
-  <tr><td>Dedup cache TTL</td><td>5 min</td><td>Mesh</td></tr>
+  <tr><td>Duplicate cache TTL</td><td>5 min</td><td>Mesh</td></tr>
   <tr><td>Cleanup interval</td><td>60 s</td><td>Mesh</td></tr>
   <tr><td>Direct retry timer</td><td>5 s + 0&ndash;2 s jitter, max 3 retries</td><td>Mesh</td></tr>
   <tr><td>Quiet-time announce keepalive</td><td>10 min without own traffic</td><td>Mesh</td></tr>
   <tr><td>CSMA busy threshold / hold</td><td>4&times; adaptive noise floor / 400 ms</td><td>PHY</td></tr>
   <tr><td>CSMA backoff / give-up</td><td>150&ndash;550 ms clear / 8 s (15 s Mercury)</td><td>PHY</td></tr>
-  <tr><td>PLI rate limit</td><td>User setting, default 60 s</td><td>Application</td></tr>
+  <tr><td>PLI rate limit</td><td>User setting, default 60 s (Figure 1)</td><td>Application</td></tr>
   <tr><td>RX duplicate window (frame hash)</td><td>30 s</td><td>Plugin</td></tr>
 </table>
 
-<h2>7. Compatibility and Constraints</h2>
+<h2>8. Compatibility and Constraints</h2>
 <ul>
-  <li>All stations on a channel must run the same plugin wire version (0.12+ mesh framing) and
-      the same modem selection.</li>
-  <li>Mercury DATAC4 limits routed Directs to ~29-byte HBC payloads (Broadcasts ~39 B). All
-      standard messages fit; very large Mode 6 markers may require Broadcast or another
-      modem.</li>
-  <li>Callsigns are limited to 8 ITA2 characters (A&ndash;Z, 0&ndash;9, hyphen).</li>
-  <li>No encryption is used or permitted; do not transmit sensitive data.</li>
+  <li>All stations on a channel must run the same plugin wire version (0.12+ mesh framing)
+      and select the same modem (Figure 3).</li>
+  <li>Mercury DATAC4&rsquo;s small frame limits routed Directs to ~29 bytes of HBC payload
+      (Broadcasts ~39 B). Every standard message fits; unusually large Mode 6 markers may
+      need Broadcast or a different modem.</li>
+  <li>Callsigns: at most 8 ITA2 characters (A&ndash;Z, 0&ndash;9, hyphen).</li>
+  <li>No encryption is used or permitted; never transmit sensitive data.</li>
 </ul>
 
-<h2>8. References</h2>
+<h2>9. Glossary</h2>
+<table>
+  <tr><th>Term</th><th>Meaning</th></tr>
+  <tr><td>ATAK</td><td>Android Team Awareness Kit — the mapping app this plugin extends</td></tr>
+  <tr><td>CoT</td><td>Cursor on Target — the XML message format ATAK uses for map events</td></tr>
+  <tr><td>EUD</td><td>End User Device — the phone/tablet running ATAK</td></tr>
+  <tr><td>PLI</td><td>Position Location Information — a &ldquo;here I am&rdquo; report</td></tr>
+  <tr><td>Modem</td><td>Modulator/demodulator — converts bytes to sound and back</td></tr>
+  <tr><td>Frame / packet</td><td>One complete chunk of bytes sent over the air</td></tr>
+  <tr><td>Payload</td><td>The useful data inside a packet, after the addressing header</td></tr>
+  <tr><td>Hop</td><td>One radio link in a relay chain (A&rarr;B is one hop; A&rarr;B&rarr;C is two)</td></tr>
+  <tr><td>Route / next hop</td><td>Address-book entry: which neighbor to hand a message to so it reaches a destination</td></tr>
+  <tr><td>ACK</td><td>Acknowledgment — a short &ldquo;received OK&rdquo; reply</td></tr>
+  <tr><td>CSMA</td><td>Carrier Sense Multiple Access — listen before transmitting to avoid collisions</td></tr>
+  <tr><td>VOX</td><td>Voice-operated transmit — the radio keys up automatically when it hears audio</td></tr>
+  <tr><td>CRC</td><td>Cyclic Redundancy Check — a checksum that detects corrupted data</td></tr>
+  <tr><td>ITA2</td><td>A 5-bit teletype alphabet from the telegraph era; smaller than normal 8-bit text</td></tr>
+  <tr><td>TTL</td><td>Time To Live — how long a record is kept before being erased</td></tr>
+  <tr><td>UID</td><td>Unique identifier string for a map object in ATAK</td></tr>
+</table>
+
+<h2>10. References</h2>
 <ol>
   <li>HBC Protocol reference implementation and specification &mdash; github.com/ke8tqb/HBC-Protocol</li>
   <li>HBC ATAK Plugin source &mdash; github.com/ke8tqb/HBC-ATAK-Plugin</li>
@@ -325,7 +447,69 @@ transmitted over the mesh.</p>
   <li>rattlegram / COFDMTV &mdash; github.com/aicodix/rattlegram</li>
 </ol>
 
-<div class="footer">HBC Radio ICD &nbsp;Version 1.0 &nbsp;|&nbsp; Aug 2026 &nbsp;|&nbsp; KE8TQB &nbsp;|&nbsp; github.com/ke8tqb/HBC-ATAK-Plugin</div>
+<div class="pagebreak"></div>
+<h2>Appendix A — GitHub Repository File Structure</h2>
+<p>The plugin source lives at github.com/ke8tqb/HBC-ATAK-Plugin. The map below shows where
+everything described in this document is implemented.</p>
+<div class="tree">HBC-ATAK-Plugin/
+├── app/
+│   ├── build.gradle                  Plugin version, ATAK version, NDK pin, signing config
+│   ├── proguard-gradle.txt           Release-build shrinker rules
+│   └── src/main/
+│       ├── AndroidManifest.xml       Plugin discovery entry required by ATAK
+│       ├── java/
+│       │   ├── com/atakmap/android/hbc/
+│       │   │   ├── HbcEncoder.java       Application layer: CoT XML → HBC bytes (Section 5)
+│       │   │   ├── HbcDecoder.java       Application layer: HBC bytes → CoT XML
+│       │   │   ├── Ita2.java             HBC's 5-bit text alphabet (Section 5.1)
+│       │   │   ├── BitReader.java        Bit-level read helper for the codec
+│       │   │   ├── BitWriter.java        Bit-level write helper for the codec
+│       │   │   ├── MeshRouter.java       Mesh network layer: packets, routing,
+│       │   │   │                         retries, ACKs (Section 4)
+│       │   │   ├── CsmaSense.java        Listen-before-transmit logic (Section 3.4)
+│       │   │   ├── AudioModem.java       AFSK1200 modem (Section 3.1)
+│       │   │   ├── OfdmModem.java        OFDM COFDMTV modem (Section 3.2)
+│       │   │   ├── OfdmNative.java       Java ↔ C++ bridge for the OFDM library
+│       │   │   ├── MercuryModem.java     Mercury HF modem (Section 3.3)
+│       │   │   ├── MercuryNative.java    Java ↔ C bridge for the FreeDV library
+│       │   │   └── plugin/
+│       │   │       └── HbcPlugin.java    The plugin itself: settings pane, toolbar
+│       │   │                             icons, TX/RX plumbing, ATAK integration
+│       │   └── sivantoledo/ax25/...      Bundled javAX25 library (AFSK/AX.25, GPL)
+│       ├── cpp/
+│       │   ├── CMakeLists.txt            Native build: libhbcofdm + libhbcmercury
+│       │   ├── hbc-ofdm-jni.cpp          C++ glue for the OFDM modem
+│       │   ├── *.hh                      Vendored aicodix OFDM/DSP headers
+│       │   ├── hbc-mercury-jni.cpp       C glue for the FreeDV DATAC modem
+│       │   ├── hbc-mercury-compat.c      Math shims for older Android versions
+│       │   └── mercury/                  Vendored FreeDV/codec2 sources (from the
+│       │                                 Mercury project; LGPL — see THIRD-PARTY.md)
+│       └── res/
+│           ├── layout/main_layout.xml    The settings/decodes pane (Figures 1–6)
+│           ├── values/strings.xml        All UI text and dropdown options
+│           └── drawable/                 Icons, incl. ic_radio_on/off (status icon)
+├── codec-test/
+│   ├── HbcCodecTest.java             Byte-exact tests for the HBC codec (runs on a PC)
+│   └── MeshRouterTest.java           Byte-exact + behavior tests for the mesh layer
+├── docs/
+│   ├── HBC_ICD.html                  This document (editable source)
+│   ├── HBC_ICD.pdf                   This document (rendered)
+│   └── images/                       Figures 1–6 (app screenshots)
+├── gradle/, gradlew, gradlew.bat     Gradle build system wrapper
+├── settings.gradle, build.gradle     Project-level build configuration
+├── .takdev/                          TAK SDK build-plugin support files
+├── CHANGELOG.md                      Version-by-version history of changes
+├── THIRD-PARTY.md                    Licenses of all bundled third-party code
+└── README.md                         Project introduction and build instructions
+</div>
+<div class="plain"><b>Where to look first:</b> the wire formats of Section 4 are all in
+<code>MeshRouter.java</code>; the message encodings of Section 5 are in
+<code>HbcEncoder.java</code>/<code>HbcDecoder.java</code>; anything you can tap in the app is
+in <code>HbcPlugin.java</code> plus <code>res/layout/main_layout.xml</code>. The
+<code>codec-test/</code> programs run on an ordinary computer (no phone needed) and prove the
+byte formats match this document.</div>
+
+<div class="footer">HBC Radio ICD &nbsp;Version 1.1 &nbsp;|&nbsp; Aug 2026 &nbsp;|&nbsp; KE8TQB &nbsp;|&nbsp; github.com/ke8tqb/HBC-ATAK-Plugin</div>
 
 </body>
 </html>
