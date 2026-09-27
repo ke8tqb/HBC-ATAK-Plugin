@@ -27,3 +27,6 @@ Thumbs.db
 ATAK-CIV-5.7.0.10-SDK/
 ATAK-CIV-5.7.0.10-SDK.zip
 
+
+# allow the checked-in prebuilt plugin APK
+!prebuilt/*.apk

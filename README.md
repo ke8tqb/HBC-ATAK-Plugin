@@ -7,9 +7,11 @@ infrastructure. Compliant with FCC Part 97 station identification (your
 callsign rides in every frame).
 
 CoT events are compressed with the
-[HBC Protocol v1.3](https://github.com/ke8tqb/HBC-Protocol) (14–49 bytes
-per message instead of 500–1000+ bytes of CoT XML) and modulated as audio
-by your choice of two software modems.
+[HBC Protocol v1.6](https://github.com/ke8tqb/HBC-Protocol) (14–49 bytes
+per message instead of 500–1000+ bytes of CoT XML), carried in a
+distance-vector mesh frame, and modulated as audio by your choice of
+three software modems — including the Mercury HF waveform for long-haul
+SSB work.
 
 ---
 
@@ -27,24 +29,65 @@ RF ──> radio audio ──> modem ──> HBC decoder ──> CoT ──> ATA
   CoT dispatcher. Duplicate frames and self-heard transmissions are
   filtered.
 
-## Two selectable modems
+## Three selectable modems
 
-| | AFSK1200 / AX.25 | OFDM COFDMTV (rattlegram) |
-|---|---|---|
-| Compatibility | Standard packet radio: digipeaters, Direwolf, APRS gear | Rattlegram-family COFDMTV (`short` branch protocol) |
-| Framing | AX.25 UI frames, callsign-SSID + digipeater path | OFDM metadata callsign + polar-coded payload |
-| Robustness | Needs a clean audio path | Very robust: tolerates device DSP, frequency offset, level variation; forward error correction |
-| Multi-hop | Yes (WIDE-style digipeating) | No (point-to-point / broadcast) |
+| | AFSK1200 / AX.25 | OFDM COFDMTV (rattlegram) | Mercury HF (FreeDV DATAC) |
+|---|---|---|---|
+| Compatibility | Standard packet radio gear: Direwolf, hardware TNCs | Rattlegram-family COFDMTV (`short` branch protocol) | The [Mercury HF modem](https://mercury.hermes.radio/) waveform: FreeDV/codec2 DATAC raw-data OFDM |
+| Framing | AX.25 UI frames as PHY framing (fixed dest `HBC`, source = your callsign for Part 97 ID) | OFDM metadata callsign + polar-coded payload | One DATAC frame per burst — `len, 'H', HBC bytes`, zero-pad, CRC-16 — with Mercury's exact preamble/postamble |
+| Robustness | Needs a clean audio path | Very robust on FM: tolerates device DSP, frequency offset, level variation; FEC | Built for HF SSB multipath: DATAC4 (~87 bps) decodes below 0 dB SNR; LDPC FEC |
+| Best for | Interop with existing packet infrastructure | VHF/UHF FM voice radios | Long-haul HF |
 
-Both modems support the phone/tablet speaker+mic (VOX-keyed radios) or a
-USB-C audio interface such as the Digirig Mobile — when a USB audio device
-is attached, TX and RX are automatically routed to it exclusively.
+All three modems support the phone/tablet speaker+mic (VOX-keyed radios)
+or a USB-C audio interface such as the Digirig Mobile — when a USB audio
+device is attached, TX and RX are automatically routed to it exclusively.
+Multi-hop delivery is handled by the mesh layer below, on every modem.
+
+> **Mercury interop note:** the plugin speaks Mercury's waveform, frame,
+> and CRC layout (the same vendored FreeDV sources, built as
+> `libhbcmercury` with a JNI bridge), so desktop Mercury demodulates the
+> bursts — but the plugin does not implement Mercury's ARQ/data-link
+> protocol, so frames will not surface on Mercury's TCP data interface.
+
+## Collision avoidance (CSMA)
+
+All three modems share an energy-based carrier sense with p-persistent
+backoff (`CsmaSense`): received audio is tracked against an adaptive
+noise floor, and before every transmission the modem waits for a clear
+channel plus a random 150–550 ms that must stay clear. After 8 s (15 s
+on Mercury HF) the frame is sent regardless so traffic is never starved.
+On AFSK the demodulator's DCD is an additional carrier-sense input.
+
+## Mesh networking
+
+Every frame carries a 13-byte distance-vector mesh header implementing
+["Adaptation of Uncoordinated Distance-Vector Routing for Unencrypted
+Amateur Radio Networks"](docs/Unencrypted_Distance-Vector_Routing_for_Amateur_Radio.pdf)
+(Reticulum-style announce propagation, no cryptography), above all three
+modems:
+
+- **Passive route learning** — hearing any frame makes the transmitter a
+  0-hop neighbor and the originator routable; stations appear in the
+  "Send to" list as soon as anything is heard from them. Lowest hop
+  count wins; routes expire after 30 minutes.
+- **Routed Direct messages with ACK** — GeoChat DMs (and their
+  delivered/read receipts) route hop-by-hop to the recipient callsign
+  with end-to-end ACK and automatic retries; markers/points can be
+  broadcast or sent direct to any learned station.
+- **Announces as keepalive only** — your own traffic already announces
+  the station via passive learning, so periodic announces fire only
+  after 10 quiet minutes; an [origin+seq] dedup cache prevents loops and
+  broadcast storms.
+- **Heard stations become ATAK chat contacts** — a single received PLI
+  makes the station selectable for direct chat (v0.18).
 
 ## Message types (HBC modes)
 
-- **PLI** position reports (Mode 1)
+- **PLI / Spot** position reports and markers with Friendly / Hostile /
+  Neutral / Unknown affiliation (Mode 1, HBC v1.5)
 - **911 Alerts** and cancels (Mode 2)
-- **GeoChat** (Mode 3)
+- **GeoChat** — All Chat Rooms, named rooms, or direct messages (Mode 3,
+  HBC v1.4)
 - **Shapes** — circles, rectangles, freeform (Mode 4)
 - **CASEVAC** 9-line (Mode 5)
 - **Extended Markers** (Mode 6, HBC v1.3) — placed markers keep their full
@@ -54,10 +97,12 @@ is attached, TX and RX are automatically routed to it exclusively.
 ## Settings (in-plugin pane, Settings tab)
 
 - Ham callsign (ITA2-validated, max 8 chars) — required
-- Modem selection (AFSK1200/AX.25 or OFDM) — must match on all stations
+- Modem selection (AFSK1200/AX.25, OFDM, or Mercury HF) — must match on
+  all stations
 - TX audio stream (Alarm / Media / Ring / Notification) — Alarm bypasses
   Samsung media DSP that distorts FSK tones
-- AX.25 destination and digipeater path
+- Send to — Broadcast, or route markers/points direct to any station
+  learned from the mesh
 - TX dwell (TXDelay preamble) and VOX leader tone duration
 - PLI rate limit; per-message-type transmit toggles; TX/RX enables
 
@@ -68,7 +113,9 @@ source, mode summary, and payload size.
 
 1. Install ATAK-CIV **5.5** (the SDK-signed `atak.apk` from the ATAK-CIV
    5.5 SDK release) and grant it microphone permission.
-2. Install the plugin APK and load it from ATAK's plugin manager.
+2. Install the plugin APK — a ready-to-install civ-debug build of the
+   current version (0.18, with the Mercury HF modem) is checked in at
+   [`prebuilt/`](prebuilt/) — and load it from ATAK's plugin manager.
 3. Toolbar → **HBC Radio** → enter callsign → Start Radio Link.
 
 ## Build
@@ -87,6 +134,18 @@ Requires the [ATAK-CIV SDK](https://github.com/TAK-Product-Center/atak-civ)
 Python [HBC-Protocol](https://github.com/ke8tqb/HBC-Protocol)
 implementation, plus `DemodFile` for running recorded audio through the
 demodulator offline.
+
+## Documentation
+
+- [`docs/HBC_ICD.html`](docs/HBC_ICD.html) ([PDF](docs/HBC_ICD.pdf)) —
+  Interface Control Document v1.2: per-control GUI reference, wire
+  formats, and log interpretation guides
+- [`docs/PROTOCOL.md`](docs/PROTOCOL.md),
+  [`docs/RADIO_SETUP.md`](docs/RADIO_SETUP.md),
+  [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md)
+- [`docs/Unencrypted_Distance-Vector_Routing_for_Amateur_Radio.pdf`](docs/Unencrypted_Distance-Vector_Routing_for_Amateur_Radio.pdf)
+  — the routing design the mesh layer implements
+- [`CHANGELOG.md`](CHANGELOG.md) — per-version details
 
 ## License
 
