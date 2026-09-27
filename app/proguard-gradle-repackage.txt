@@ -1,1 +1,1 @@
--repackageclasses atakplugin.hbcplugin
+-repackageclasses atakplugin.HBC-ATAK-Plugin

@@ -17,7 +17,16 @@ sdk.dir=C\:/Users/YourName/AppData/Local/Android/Sdk
 ## ============================================================
 
 ## Point to the atak-gradle-takdev.jar from the unzipped SDK:
-takdev.plugin=C\:/path/to/ATAK-SDK-5.6.0/atak-gradle-takdev.jar
+takdev.plugin=C\:/path/to/ATAK-CIV-5.7.0.15-SDK/atak-gradle-takdev.jar
+
+## Point to the unzipped SDK folder itself. This switches takdev into its
+## Offline DevKit mode, where main.jar, the debug keystore, mapping.txt and
+## the core proguard rules all come from the SDK (no TAK maven repo needed):
+sdk.path=C\:/path/to/ATAK-CIV-5.7.0.15-SDK
+
+## The ATAK line to target (stamps the plugin-api string; one APK per line).
+## Can also be passed per build:  gradlew -PATAK_VERSION=5.8.0 assembleCivDebug
+# ATAK_VERSION=5.7.0
 
 ## NOTE: For DEBUG builds, NO signing keys are needed in local.properties.
 ## The atak-gradle-takdev Gradle plugin automatically generates a debug

@@ -23,9 +23,11 @@ local.properties
 # Windows
 Thumbs.db
 
-# ATAK SDK (large — not committed)
-ATAK-CIV-5.7.0.10-SDK/
-ATAK-CIV-5.7.0.10-SDK.zip
+# ATAK SDKs (large — not committed; build-both.ps1 caches extracted SDKs
+# under %LOCALAPPDATA%\ATAK-SDKs)
+ATAK-CIV-*-SDK/
+ATAK-CIV-*-SDK.zip
+sdk/
 
 
 # allow the checked-in prebuilt plugin APK

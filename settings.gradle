@@ -1,1 +1,6 @@
+// Pin the project name: archivesBaseName and the proguard repackage id
+// (atakplugin.<name>) derive from it, so it must not depend on the name of
+// the checkout folder (pipeline checkouts use arbitrary directory names).
+rootProject.name = 'HBC-ATAK-Plugin'
+
 include ':app'

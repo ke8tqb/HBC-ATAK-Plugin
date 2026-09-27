@@ -111,23 +111,46 @@ source, mode summary, and payload size.
 
 ## Install
 
-1. Install ATAK-CIV **5.5** (the SDK-signed `atak.apk` from the ATAK-CIV
-   5.5 SDK release) and grant it microphone permission.
-2. Install the plugin APK — a ready-to-install civ-debug build of the
-   current version (0.18, with the Mercury HF modem) is checked in at
-   [`prebuilt/`](prebuilt/) — and load it from ATAK's plugin manager.
-3. Toolbar → **HBC Radio** → enter callsign → Start Radio Link.
+1. Install ATAK-CIV **5.7 or 5.8** (the SDK-signed `atak.apk` from the
+   matching ATAK-CIV SDK release) and grant it microphone permission.
+2. Install the plugin APK **for your ATAK line** — ready-to-install
+   civ-debug builds for both 5.7.x and 5.8.x are checked in at
+   [`prebuilt/`](prebuilt/). The plugin-api must match exactly: a 5.7
+   build will not load on 5.8 and vice versa.
+3. Load it from ATAK's plugin manager, then Toolbar → **HBC Radio** →
+   enter callsign → Start Radio Link.
 
 ## Build
 
-Requires the [ATAK-CIV SDK](https://github.com/TAK-Product-Center/atak-civ)
-(5.5.x), Android SDK 35, NDK 27, CMake 3.22, JDK 17+.
+Requires an [ATAK-CIV SDK](https://tak.gov) zip (5.7.x and/or 5.8.x),
+Android SDK 35, NDK 25.1.8937393, CMake 3.22, JDK 17+.
+
+An APK only loads on the ATAK line it was built for (ATAK requires an
+exact `plugin-api` match), so each supported line gets its own build of
+this same source — pick the target with `-PATAK_VERSION` (default 5.7.0):
 
 ```
-# place this project in the SDK's samples/ directory (or set takdev.plugin
-# and sdk paths in local.properties; see template.local.properties)
-./gradlew assembleCivRelease
+# local.properties needs sdk.dir, takdev.plugin and sdk.path
+# (see local.properties.example)
+./gradlew -PATAK_VERSION=5.7.0 assembleCivDebug
+./gradlew -PATAK_VERSION=5.8.0 assembleCivDebug
 ```
+
+Or build every supported line in one shot (Windows):
+
+```
+./build-both.ps1                            # civ-debug for 5.7.0 + 5.8.0
+./build-both.ps1 -Task assembleCivRelease   # proguarded release builds
+```
+
+`build-both.ps1` extracts each SDK zip once (cached under
+`%LOCALAPPDATA%\ATAK-SDKs`), runs takdev in Offline DevKit mode against it
+(`-Psdk.path`), stamps the matching plugin-api, and collects the
+version-suffixed APKs. For production signatures, submit this source to
+the TAK.gov third-party pipeline — it performs the same
+rebuild-per-version with the store signing keys (the repo meets the
+pipeline source requirements: root `assembleCivRelease`, takdev, plugin
+proguard repackage, `com.atakmap.app.component` discovery activity).
 
 `codec-test/` contains JVM-runnable reference-vector tests
 (`HbcCodecTest`, `Mode6Test`) verifying byte-for-byte parity with the

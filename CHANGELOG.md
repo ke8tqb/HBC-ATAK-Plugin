@@ -4,6 +4,27 @@ All notable changes to HBC Audio Plugin are documented here.
 
 ---
 
+## [0.19] — One source, one APK per ATAK line (5.7 + 5.8)
+
+- ATAK_VERSION is now a build parameter (`-PATAK_VERSION=5.8.0`, or set it
+  in local.properties; default 5.7.0) instead of a hardcoded constant.
+  ATAK's loader demands an exact plugin-api match (verified against
+  AtakPluginRegistry), so covering 5.7.x and 5.8.x means one build per
+  line — now produced from the same commit. No plugin code changes.
+- New `build-both.ps1`: extracts each ATAK-CIV SDK zip once (cached under
+  %LOCALAPPDATA%\ATAK-SDKs), runs takdev in Offline DevKit mode
+  (`-Psdk.path`, now documented in local.properties.example), stages the
+  SDK debug keystore, builds the requested task per line, and collects
+  the version-suffixed APKs.
+- `rootProject.name` pinned to HBC-ATAK-Plugin so APK names and the
+  proguard repackage id no longer depend on the checkout folder name
+  (matters for pipeline checkouts).
+- Prebuilt APKs refreshed: civ-debug builds for ATAK 5.7.0 and 5.8.0,
+  manifest stamps verified (`com.atakmap.app@5.7.0.CIV` /
+  `com.atakmap.app@5.8.0.CIV`).
+
+---
+
 ## [0.18] — Heard stations become ATAK chat contacts
 
 - Received PLIs are now reconstructed with a `<contact endpoint>` and a

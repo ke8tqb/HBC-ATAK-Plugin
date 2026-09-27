@@ -8,11 +8,7 @@
 
 buildscript {
 
-    ext.PLUGIN_VERSION = "0.18"
-    // Must exactly match the host ATAK's declared plugin-api. ATAK-CIV
-    // 5.5.1.x declares "com.atakmap.app@5.5.1.CIV" (the third digit is the
-    // API level; the fourth is a patch that shares the same API).
-    ext.ATAK_VERSION = "5.5.1"
+    ext.PLUGIN_VERSION = "0.19"
 
     def takdevVersion = '3.+'
 
@@ -34,6 +30,18 @@ buildscript {
                 getValueFromPropertiesFile(project.rootProject.file('local.properties'), name)
         return (null == prop) ? defValue : prop
     }
+
+    // ATAK plugin-api target. Must exactly match the host ATAK's declared
+    // plugin-api line: ATAK-CIV 5.7.0.x declares "com.atakmap.app@5.7.0.CIV"
+    // (first three digits = the API line; a fourth digit is a patch that
+    // shares the same API). An APK can carry only ONE of these strings, so
+    // covering several ATAK lines means one build per line from this same
+    // source. Override per build:
+    //     gradlew -PATAK_VERSION=5.8.0 assembleCivDebug
+    // (or set ATAK_VERSION in local.properties). build-both.ps1 automates
+    // one build per supported line; the TAK third-party pipeline performs
+    // the same rebuild-per-version on its side.
+    ext.ATAK_VERSION = getProperty('ATAK_VERSION', '5.7.0')
 
     def urlKey = 'takrepo.url'
 
