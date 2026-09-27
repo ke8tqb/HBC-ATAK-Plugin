@@ -118,8 +118,14 @@ task runTypst(dependsOn: setupTypst) {
     }
 }
 
-// Only runs by default on the official ATAK release pipeline.
-if (System.getenv("ATAK_CI") == "1") {
+// Only runs on CI (the official ATAK release pipeline and the TAK
+// third-party pipeline both export ATAK_CI), and only when a typst
+// user-manual source actually exists in this repo. Without the second
+// check an unconditional hook fails CI builds with
+// "Error: No *.typ file found" because this project has no
+// docs/user_manual yet.
+def hasUserManual = !fileTree(dir: "$rootDir/docs/user_manual", include: '**/*.typ').isEmpty()
+if (System.getenv("ATAK_CI") == "1" && hasUserManual) {
     println("running typst to generate the user manual");
     android.applicationVariants.all { variant ->
         variant.mergeResourcesProvider.configure {

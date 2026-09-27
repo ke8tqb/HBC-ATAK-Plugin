@@ -146,11 +146,33 @@ Or build every supported line in one shot (Windows):
 `build-both.ps1` extracts each SDK zip once (cached under
 `%LOCALAPPDATA%\ATAK-SDKs`), runs takdev in Offline DevKit mode against it
 (`-Psdk.path`), stamps the matching plugin-api, and collects the
-version-suffixed APKs. For production signatures, submit this source to
-the TAK.gov third-party pipeline — it performs the same
-rebuild-per-version with the store signing keys (the repo meets the
-pipeline source requirements: root `assembleCivRelease`, takdev, plugin
-proguard repackage, `com.atakmap.app.component` discovery activity).
+version-suffixed APKs.
+
+### TAK.gov third-party pipeline submission
+
+For production signatures, submit the source to the pipeline
+(tak.gov → Resources → Third Party Pipeline). `make-submission.ps1`
+produces the zip in the shape the pipeline requires — a single
+`HBC-ATAK-Plugin/` root folder (the pipeline names its APKs after it),
+tracked files only (no `local.properties`, no build outputs, prebuilt
+APKs excluded), with the target ATAK line pinned via `ATAK_VERSION` in
+`gradle.properties`:
+
+```
+./make-submission.ps1                     # source zip targeting ATAK 5.7.0
+./make-submission.ps1 -AtakVersion 5.8.0  # source zip targeting ATAK 5.8.0
+```
+
+Pipeline source-archive requirements and how this repo meets them:
+
+- Gradle build at the archive root with `assembleCivRelease` defined
+- Every ATAK SDK reference resolved through `atak-gradle-takdev`
+  (current-plugintemplate configuration; the pipeline supplies the TAK
+  maven repo credentials at build time)
+- Plugin-specific proguard repackage: `atakplugin.HBC-ATAK-Plugin`
+- `com.atakmap.app.component` discovery activity in AndroidManifest.xml
+- `ndkVersion` pinned to 25.1.8937393, one of the NDKs pre-installed on
+  the pipeline build machine (it does not install declared versions)
 
 `codec-test/` contains JVM-runnable reference-vector tests
 (`HbcCodecTest`, `Mode6Test`) verifying byte-for-byte parity with the
