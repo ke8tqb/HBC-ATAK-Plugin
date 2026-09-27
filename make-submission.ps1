@@ -37,24 +37,45 @@ try {
     # Tracked files only: local.properties, build/, SDK folders etc. are
     # gitignored and therefore never in the archive. Prebuilt APKs are
     # tracked but not source - exclude them.
+    #
+    # IMPORTANT: keep git's own zip as the final artifact. git archive
+    # writes spec-compliant forward-slash entry names; re-zipping with
+    # Windows PowerShell 5.1 Compress-Archive produces backslash entry
+    # names, which extract as broken filenames on the pipeline's Linux
+    # build machine.
     $tmpZip = Join-Path $stage 'src.zip'
     git -C $repo archive --format=zip -o $tmpZip --prefix="$root/" HEAD ':(exclude)prebuilt'
     if ($LASTEXITCODE -ne 0) { throw 'git archive failed' }
-    Expand-Archive $tmpZip $stage
-    Remove-Item $tmpZip
 
-    # Pin the ATAK line for this submission.
-    Add-Content (Join-Path $stage "$root\gradle.properties") @"
-
-# TAK third-party pipeline target: stamps the plugin-api string and selects
-# the takdev maven artifact version. (Command-line -PATAK_VERSION overrides.)
-ATAK_VERSION=$AtakVersion
-"@
+    # Pin the ATAK line for this submission by rewriting gradle.properties
+    # inside the zip (Update mode preserves every other entry untouched).
+    Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
+    $za = [System.IO.Compression.ZipFile]::Open($tmpZip, 'Update')
+    try {
+        $name = "$root/gradle.properties"
+        $entry = $za.GetEntry($name)
+        if (-not $entry) { throw "$name not found in archive" }
+        $sr = New-Object System.IO.StreamReader($entry.Open())
+        $text = $sr.ReadToEnd()
+        $sr.Close()
+        $entry.Delete()
+        $entry = $za.CreateEntry($name)
+        $sw = New-Object System.IO.StreamWriter($entry.Open())
+        $sw.NewLine = "`n"
+        $sw.Write($text.TrimEnd() + "`n`n" +
+            "# TAK third-party pipeline target: stamps the plugin-api string and`n" +
+            "# selects the takdev maven artifact version.`n" +
+            "# (Command-line -PATAK_VERSION overrides.)`n" +
+            "ATAK_VERSION=$AtakVersion`n")
+        $sw.Close()
+    } finally {
+        $za.Dispose()
+    }
 
     New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
     $zip = Join-Path $OutDir "$root-src-$pluginVer-$hash-atak$AtakVersion.zip"
     if (Test-Path $zip) { Remove-Item $zip }
-    Compress-Archive -Path (Join-Path $stage $root) -DestinationPath $zip
+    Move-Item $tmpZip $zip
 
     Write-Host "Submission zip : $zip"
     Write-Host "Root folder    : $root  (pipeline names its APKs after this)"
