@@ -6,6 +6,12 @@ All notable changes to HBC Audio Plugin are documented here.
 
 ## [Unreleased]
 
+- prebuilt/: added the TAK Product Center production-signed 0.20
+  civ-release APKs for ATAK 5.7.0 and 5.8.0 (third-party pipeline
+  output; signer CN "TAK Product Center ATAK Untrusted Plugin
+  Release") alongside the SDK-signed civ-debug builds. The release
+  APKs load on official ATAK-CIV distributions; the debug APKs only on
+  the SDK's atak.apk.
 - ICD v1.3: the User Interface Reference figures are now current 0.20
   release-build screenshots with red arrows pointing at the controls
   each caption describes, plus a new Figure 1 showing where the plugin

@@ -111,12 +111,17 @@ source, mode summary, and payload size.
 
 ## Install
 
-1. Install ATAK-CIV **5.7 or 5.8** (the SDK-signed `atak.apk` from the
-   matching ATAK-CIV SDK release) and grant it microphone permission.
-2. Install the plugin APK **for your ATAK line** — ready-to-install
-   civ-debug builds for both 5.7.x and 5.8.x are checked in at
+1. Install ATAK-CIV **5.7 or 5.8** and grant it microphone permission.
+2. Install the plugin APK **for your ATAK line** from
    [`prebuilt/`](prebuilt/). The plugin-api must match exactly: a 5.7
-   build will not load on 5.8 and vice versa.
+   build will not load on 5.8 and vice versa. Two signing flavors are
+   checked in for each line:
+   - `*-civ-release.apk` — **production builds signed by the TAK
+     Product Center** (third-party pipeline). Use these with the
+     official ATAK-CIV releases from tak.gov or the Play Store.
+   - `*-civ-debug.apk` — SDK-keystore builds. These only load on the
+     SDK-signed `atak.apk` that ships inside each ATAK-CIV SDK zip
+     (developer setups).
 3. Load it from ATAK's plugin manager, then Toolbar → **HBC Radio** →
    enter callsign → Start Radio Link.
 
