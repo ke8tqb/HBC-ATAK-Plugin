@@ -183,8 +183,8 @@ demodulator offline.
 ## Documentation
 
 - [`docs/HBC_ICD.html`](docs/HBC_ICD.html) ([PDF](docs/HBC_ICD.pdf)) —
-  Interface Control Document v1.2: per-control GUI reference, wire
-  formats, and log interpretation guides
+  Interface Control Document v1.3: per-control GUI reference with
+  annotated screenshots, wire formats, and log interpretation guides
 - [`docs/PROTOCOL.md`](docs/PROTOCOL.md),
   [`docs/RADIO_SETUP.md`](docs/RADIO_SETUP.md),
   [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md)

@@ -35,7 +35,7 @@
   <h1>HBC RADIO</h1>
   <div class="sub">ATAK Plugin &mdash; Interface Control Document</div>
   <div class="sub">Ham Binary CoT over Distance-Vector Mesh Radio</div>
-  <div class="contact">Version 1.2 &nbsp;|&nbsp; KE8TQB &nbsp;|&nbsp; github.com/ke8tqb/HBC-ATAK-Plugin</div>
+  <div class="contact">Version 1.3 &nbsp;|&nbsp; KE8TQB &nbsp;|&nbsp; github.com/ke8tqb/HBC-ATAK-Plugin</div>
 </div>
 
 <div class="toc">
@@ -133,7 +133,7 @@ forward it toward its destination, rebroadcast it (announces), or ignore it.</p>
 <p>A modem converts bytes into sound and sound back into bytes. HBC Radio offers three, each
 suited to different radios and conditions. All three carry the exact same mesh frame, but
 they are not compatible with each other &mdash; <b>every station on a channel must select
-the same modem</b> (Figure 3).</p>
+the same modem</b> (Figure 4).</p>
 <table>
   <tr><th>Parameter</th><th>AFSK1200</th><th>OFDM COFDMTV</th><th>Mercury HF</th></tr>
   <tr><td>Waveform</td><td>Bell 202 AFSK, 1200 baud</td><td>QPSK OFDM (rattlegram &ldquo;short&rdquo;), 1600 Hz BW</td><td>FreeDV DATAC4 raw-data OFDM (codec2)</td></tr>
@@ -355,55 +355,66 @@ intercepted by the plugin and transmitted over the mesh.</p>
 
 <div class="pagebreak"></div>
 <h2>6. User Interface Reference (Screenshots)</h2>
-<p>All configuration lives in one pane, opened from the HBC toolbar icon. This section shows
-each screen (6.1), explains every control (6.2) and toolbar icon (6.3), and teaches how to
-read the two logs (6.4, 6.5).</p>
+<p>All configuration lives in one pane, opened from the HBC Radio entry in ATAK&rsquo;s
+Tools menu (Figure 1). This section shows each screen (6.1), explains every control (6.2)
+and toolbar icon (6.3), and teaches how to read the two logs (6.4, 6.5). Red arrows in the
+figures point at the controls each caption describes.</p>
 <h3>6.1 Screen-by-Screen Figures</h3>
 
 <div class="figure">
-  <img src="images/fig1_settings_pane.jpg" alt="HBC settings pane">
-  <div class="cap">Figure 1 &mdash; The Settings tab: link status (STOPPED) with the
-  &ldquo;Next PLI&rdquo; countdown beneath it, ham callsign entry, the Send-to destination
-  selector, and the TX Dwell / VOX Lead / PLI rate timing fields (sections 3.1, 3.4, 4.7).</div>
+  <img src="images/fig1_tools_menu.jpg" alt="ATAK Tools menu with the HBC Radio entry">
+  <div class="cap">Figure 1 &mdash; Opening the plugin: ATAK menu (&#9776;) &rarr; Tools
+  &rarr; <b>HBC Radio</b> (arrow). The same grid is where ATAK lists every installed
+  plugin; the radio-status icon of section 6.3 can also be dragged into the top toolbar
+  row for one-tap access.</div>
 </div>
 
 <div class="figure">
-  <img src="images/fig2_send_to.jpg" alt="Send-to selector">
-  <div class="cap">Figure 2 &mdash; The Send-to selector expanded. &ldquo;Broadcast
-  (everyone)&rdquo; is the default; every station learned by the mesh (section 4.7) is added
-  to this list automatically and can be chosen as a routed Direct destination for
-  markers/points.</div>
+  <img src="images/fig2_settings_pane.jpg" alt="HBC settings pane, top half">
+  <div class="cap">Figure 2 &mdash; The Settings tab, top half. Arrows, top to bottom: the
+  link status line (<code>STOPPED</code>) with the &ldquo;Next PLI&rdquo; countdown beneath
+  it; the ham callsign entry (required before starting); and the Send-to destination
+  selector &mdash; &ldquo;Broadcast (everyone)&rdquo; by default, with every station learned
+  by the mesh (section 4.7) added to the list automatically as a routed Direct destination
+  for markers/points.</div>
 </div>
 
 <div class="figure">
-  <img src="images/fig3_modem_select.jpg" alt="Modem selection">
-  <div class="cap">Figure 3 &mdash; Modem selection (section 3): AFSK1200/AX.25, OFDM
-  COFDMTV, or Mercury HF (FreeDV DATAC4). All stations on a channel must choose the same
-  modem.</div>
+  <img src="images/fig3_timing_modem_stream.jpg" alt="Timing fields, modem and TX audio stream selectors">
+  <div class="cap">Figure 3 &mdash; Settings tab, middle. Arrows, top to bottom: the
+  TX Dwell / VOX Lead / PLI rate timing fields (sections 3.1, 3.4, 4.7); the modem selector
+  (must match on all stations &mdash; expanded in Figure 4); and the TX audio stream
+  selector &mdash; &ldquo;Alarm&rdquo; is the default because it bypasses phone media
+  effects (EQ, spatial audio) that can distort modem tones; Media, Ring, and Notification
+  exist for devices that behave differently.</div>
 </div>
 
 <div class="figure">
-  <img src="images/fig4_tx_stream.jpg" alt="TX audio stream selection">
-  <div class="cap">Figure 4 &mdash; TX audio stream selection. &ldquo;Alarm&rdquo; is the
-  default because it bypasses phone media effects (EQ, spatial audio) that can distort modem
-  tones; the alternatives exist for devices that behave differently.</div>
+  <img src="images/fig4_modem_select.jpg" alt="Modem selection expanded">
+  <div class="cap">Figure 4 &mdash; The modem selector expanded (section 3), one arrow per
+  waveform: AFSK1200/AX.25 (3.1), OFDM COFDMTV (3.2), and Mercury HF / FreeDV DATAC4 (3.3).
+  All stations on a channel must choose the same modem.</div>
 </div>
 
 <div class="figure">
   <img src="images/fig5_msg_types.jpg" alt="Message type filters and start button">
-  <div class="cap">Figure 5 &mdash; Transmit/Receive master switches, the per-type transmit
-  filters (PLI, Spots, Alerts, Chat, Shapes, CASEVAC &mdash; the HBC modes of section 5.2),
-  the Start Radio Link button, and the Activity Log.</div>
+  <div class="cap">Figure 5 &mdash; Settings tab, bottom. Arrows, top to bottom: the
+  Transmit/Receive master switches; the per-type transmit filters (PLI, Spots, Alerts,
+  Chat, Shapes, CASEVAC &mdash; the HBC modes of section 5.2); and the Start Radio Link
+  button. The Activity Log (section 6.4) scrolls beneath it.</div>
 </div>
 
 <div class="figure">
   <img src="images/fig6_decodes.jpg" alt="Packet decodes tab">
   <div class="cap">Figure 6 &mdash; The Decodes tab: a running log of every packet
-  successfully received and decoded, with sender, mode, and payload size.</div>
+  successfully received and decoded (empty here &mdash; nothing heard yet). Arrows: the
+  active tab&rsquo;s button is the grayed one; Clear empties the log and resets its packet
+  counter; decoded packets appear in the list area with sender, mode summary, and payload
+  size (section 6.5).</div>
 </div>
 
 <h3>6.2 Every Control and What It Does</h3>
-<p>Top to bottom through the Settings tab (Figures 1 and 5):</p>
+<p>Top to bottom through the Settings tab (Figures 2, 3, and 5):</p>
 <table>
   <tr><th>Control</th><th>Type</th><th>What it does</th></tr>
   <tr><td>Settings / Decodes</td><td>Tab buttons</td><td>Switch between the configuration screen and the received-packet log. The active tab&rsquo;s button is grayed out.</td></tr>
@@ -414,8 +425,8 @@ read the two logs (6.4, 6.5).</p>
   <tr><td>TX Dwell ms</td><td>Number field</td><td>AFSK only: length of the HDLC flag preamble sent before data so the receiving modem can sync. Default 500. Increase if receivers miss the start of packets.</td></tr>
   <tr><td>VOX Lead ms</td><td>Number field</td><td>Warm-up audio played before data so a VOX-keyed radio has time to key up. Default 0 (use 0 with a hardwired PTT interface). Increase if the first part of transmissions is cut off.</td></tr>
   <tr><td>PLI min s</td><td>Number field</td><td>Minimum seconds between your own position reports (rate limit). Default 60. Drives the &ldquo;Next PLI&rdquo; countdown.</td></tr>
-  <tr><td>Modem</td><td>Dropdown</td><td>Which of the three waveforms to use (section 3, Figure 3). Must match on every station.</td></tr>
-  <tr><td>TX audio stream</td><td>Dropdown</td><td>Which Android audio channel carries the transmit tones (Figure 4). Default Alarm; try the others only if your device distorts the tones.</td></tr>
+  <tr><td>Modem</td><td>Dropdown</td><td>Which of the three waveforms to use (section 3, Figure 4). Must match on every station.</td></tr>
+  <tr><td>TX audio stream</td><td>Dropdown</td><td>Which Android audio channel carries the transmit tones (Figure 3). Default Alarm; try the others only if your device distorts the tones.</td></tr>
   <tr><td>Transmit / Receive</td><td>Checkboxes</td><td>Master switches. Unchecking Transmit makes the station receive-only; unchecking Receive ignores all incoming audio.</td></tr>
   <tr><td>PLI, Spots, Alerts, Chat, Shapes, CASEVAC</td><td>Checkboxes</td><td>Per-type transmit filters, matching the HBC modes of section 5.2. An unchecked type is never transmitted (receiving is unaffected).</td></tr>
   <tr><td>Start / Stop Radio Link</td><td>Button</td><td>Validates and saves the settings, then starts (or stops) the selected modem and the mesh layer. The label flips to match the current state.</td></tr>
@@ -426,7 +437,7 @@ read the two logs (6.4, 6.5).</p>
 <h3>6.3 Toolbar Icons</h3>
 <table>
   <tr><th>Icon</th><th>Tap</th><th>Notes</th></tr>
-  <tr><td>HBC plugin icon (antenna &ldquo;X&rdquo;)</td><td>Opens the settings pane</td><td>The plugin&rsquo;s main entry point in ATAK&rsquo;s toolbar/plugin list.</td></tr>
+  <tr><td>HBC plugin icon (antenna &ldquo;X&rdquo;)</td><td>Opens the settings pane</td><td>The plugin&rsquo;s main entry point in ATAK&rsquo;s Tools menu (Figure 1).</td></tr>
   <tr><td>Radio status icon</td><td>Starts/stops the modem (with a confirmation toast)</td><td>Gray = modem stopped; electric green with a light-green glow = modem running. Long-press shows the state tooltip (&ldquo;HBC Radio: RUNNING (tap to stop)&rdquo; / &ldquo;STOPPED (tap to start)&rdquo;). If no callsign is saved yet, tapping opens settings instead. Can be dragged into ATAK&rsquo;s top toolbar row like any tool.</td></tr>
 </table>
 
@@ -513,14 +524,14 @@ answers &ldquo;what have I actually received?&rdquo;</div>
   <tr><td>Quiet-time announce keepalive</td><td>10 min without own traffic</td><td>Mesh</td></tr>
   <tr><td>CSMA busy threshold / hold</td><td>4&times; adaptive noise floor / 400 ms</td><td>PHY</td></tr>
   <tr><td>CSMA backoff / give-up</td><td>150&ndash;550 ms clear / 8 s (15 s Mercury)</td><td>PHY</td></tr>
-  <tr><td>PLI rate limit</td><td>User setting, default 60 s (Figure 1)</td><td>Application</td></tr>
+  <tr><td>PLI rate limit</td><td>User setting, default 60 s (Figure 2)</td><td>Application</td></tr>
   <tr><td>RX duplicate window (frame hash)</td><td>30 s</td><td>Plugin</td></tr>
 </table>
 
 <h2>8. Compatibility and Constraints</h2>
 <ul>
   <li>All stations on a channel must run the same plugin wire version (0.12+ mesh framing)
-      and select the same modem (Figure 3).</li>
+      and select the same modem (Figure 4).</li>
   <li>Mercury DATAC4&rsquo;s small frame limits routed Directs to ~29 bytes of HBC payload
       (Broadcasts ~39 B). Every standard message fits; unusually large Mode 6 markers may
       need Broadcast or a different modem.</li>

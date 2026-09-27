@@ -4,6 +4,16 @@ All notable changes to HBC Audio Plugin are documented here.
 
 ---
 
+## [Unreleased]
+
+- ICD v1.3: the User Interface Reference figures are now current 0.20
+  release-build screenshots with red arrows pointing at the controls
+  each caption describes, plus a new Figure 1 showing where the plugin
+  lives in ATAK's Tools menu. Figure numbering and cross-references
+  updated; PDF regenerated.
+
+---
+
 ## [0.20] — Security hardening from the first pipeline scan
 
 Both 0.19 submissions built and signed successfully on the TAK.gov
