@@ -118,10 +118,31 @@ public final class HbcEncoder {
 
     /** Encode a CoT XML event string into HBC bytes. */
     public static Encoded encode(String cotXml) throws HbcEncodeException {
+        if (cotXml == null)
+            throw new HbcEncodeException("CoT XML is null");
+        // CoT events never carry a DTD. Rejecting DOCTYPE outright blocks
+        // XXE and entity-expansion payloads on every parser implementation,
+        // including Android's, which does not implement the Xerces feature
+        // URIs set below.
+        if (cotXml.contains("<!DOCTYPE"))
+            throw new HbcEncodeException("DOCTYPE is not allowed in CoT XML");
         Element root;
         try {
             DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
             dbf.setNamespaceAware(false);
+            dbf.setExpandEntityReferences(false);
+            // XXE / XML-bomb hardening: forbid DTDs and external entity
+            // resolution. The JDK's Xerces honors these features (used by
+            // the codec-test JVM harness); Android's factory throws on the
+            // unsupported URIs and is covered by the DOCTYPE reject above.
+            try {
+                dbf.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+                dbf.setFeature("http://xml.org/sax/features/external-general-entities", false);
+                dbf.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+                dbf.setXIncludeAware(false);
+            } catch (Exception ignored) {
+                // Factory does not support the Xerces feature URIs (Android).
+            }
             Document doc = dbf.newDocumentBuilder()
                     .parse(new ByteArrayInputStream(cotXml.getBytes(StandardCharsets.UTF_8)));
             root = doc.getDocumentElement();

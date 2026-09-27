@@ -28,7 +28,6 @@ public class SpotTest {
             System.out.println("DECODED: " + dec.summary());
         } catch (Exception e) {
             System.out.println("ENCODE FAILED: " + e);
-            e.printStackTrace();
         }
     }
 }

@@ -9,6 +9,10 @@ app/build/
 app/src/main/cpp/deps/
 .cxx/
 
+# takdev staging area (the takdev gradle plugin re-extracts its lint AAR
+# here from its own jar on every build)
+.takdev/
+
 # Local config — never commit this!
 local.properties
 

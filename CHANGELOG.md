@@ -4,6 +4,32 @@ All notable changes to HBC Audio Plugin are documented here.
 
 ---
 
+## [0.20] — Security hardening from the first pipeline scan
+
+Both 0.19 submissions built and signed successfully on the TAK.gov
+third-party pipeline; this release clears the Fortify SCA findings the
+pipeline reported (1 High, 2 Low — no Criticals).
+
+- `HbcEncoder.encode()` now rejects CoT XML containing a DOCTYPE and
+  configures the DOM parser with `disallow-doctype-decl` and external
+  general/parameter entity resolution disabled where the runtime
+  supports the Xerces feature URIs (the JDK does; Android's factory
+  rejects them, never resolves external entities, and is covered by the
+  DOCTYPE reject). Clears XML External Entity Injection (High) and XML
+  Entity Expansion Injection (Low) at HbcEncoder.java:126.
+- `codec-test/SpotTest` no longer prints a stack trace on encode
+  failure (System Information Leak, Low; JVM-only test harness).
+- The pipeline's dependency-check flagged CVE-2025-54057 (Apache
+  SkyWalking) against two *empty* jars — a build intermediate and
+  takdev's staged lint AAR — hash-matched to empty SkyWalking artifacts
+  on Maven Central. False positive; the plugin contains no SkyWalking.
+  `.takdev/` is now untracked (the takdev plugin re-extracts it from its
+  own jar on every build), which drops that AAR from future submission
+  zips and with it one of the two false-positive surfaces.
+- Prebuilt civ-debug APKs refreshed to 0.20 (ATAK 5.7.0 + 5.8.0).
+
+---
+
 ## [0.19] — One source, one APK per ATAK line (5.7 + 5.8)
 
 - ATAK_VERSION is now a build parameter (`-PATAK_VERSION=5.8.0`, or set it
