@@ -77,6 +77,12 @@ public final class HbcDecoder {
         public boolean hasTint;
         public int tintArgb;
 
+        /** Set by the plugin before toXml(): a live ATAK network contact
+         *  with the same callsign already exists (e.g. both stations also
+         *  share a WiFi/TAK-server link), so omit the mesh endpoint from
+         *  the reconstructed PLI to avoid a duplicated contacts-list row. */
+        public boolean suppressEndpoint = false;
+
         public String summary() {
             switch (mode) {
                 case 0: return "Mode 0 Ack(" + (ackKind == 1 ? "READ" : "DELIVERED")
@@ -149,16 +155,30 @@ public final class HbcDecoder {
             point(sb, lat, lon);
             sb.append("  <detail>\n");
             if (!isSpot) {
+                // Contact display name. The 7-char Mode 1 name field
+                // truncates longer ATAK callsigns (KEYSTONE -> KEYSTON);
+                // when the separately-carried station callsign confirms the
+                // name is just its truncated prefix, use the full callsign.
+                // Otherwise chat replies to this contact are addressed to
+                // the truncated name and the station drops them as
+                // "not this station".
+                String display = name.isEmpty() ? callsign : name;
+                if (display.length() >= 7
+                        && callsign.length() > display.length()
+                        && callsign.toUpperCase().startsWith(display.toUpperCase()))
+                    display = callsign;
                 // ATAK only registers a station as a messageable contact
                 // (chat DM list, "send to" pickers) when its PLI carries a
                 // <contact endpoint=...>. Use the standard mesh endpoint
                 // placeholder; outgoing chat to it is intercepted by the
                 // plugin's PreSendProcessor and sent over HBC anyway.
                 sb.append("    <contact callsign=\"")
-                  .append(esc(name.isEmpty() ? callsign : name))
-                  .append("\" endpoint=\"*:-1:stcp\"/>\n");
+                  .append(esc(display));
+                if (!suppressEndpoint)
+                    sb.append("\" endpoint=\"*:-1:stcp");
+                sb.append("\"/>\n");
                 sb.append("    <__group name=\"Cyan\" role=\"Team Member\"/>\n");
-                sb.append("    <uid Droid=\"").append(esc(name.isEmpty() ? callsign : name)).append("\"/>\n");
+                sb.append("    <uid Droid=\"").append(esc(display)).append("\"/>\n");
                 sb.append("    <track speed=\"0.0\" course=\"9999999.0\"/>\n");
             } else {
                 sb.append("    <contact callsign=\"").append(esc(name.isEmpty() ? callsign : name)).append("\"/>\n");
@@ -234,7 +254,16 @@ public final class HbcDecoder {
               .append("\" uid1=\"").append(esc(destUid)).append("\"/>\n");
             sb.append("    </__chat>\n");
             sb.append("    <link uid=\"").append(esc(senderUid)).append("\" type=\"a-f-G-U\" relation=\"p-p\"/>\n");
-            sb.append("    <remarks source=\"BAO.F.HBC.").append(esc(senderUid))
+            // remarks/@source MUST use the BAO.F.ATAK. prefix: ATAK's
+            // ChatMessageParser.getSenderUid() strips exactly that prefix to
+            // recover the sender uid. Any other prefix (we used BAO.F.HBC.)
+            // is taken VERBATIM as the sender uid, so ATAK fabricated a
+            // second contact "BAO.F.HBC.HBC-<CALL>" and filed incoming DMs
+            // into its window while replies went out from the real
+            // HBC-<CALL> contact — a split conversation. With this prefix
+            // the sender resolves to our injected HBC-<CALL> contact and
+            // both directions share one chat window.
+            sb.append("    <remarks source=\"BAO.F.ATAK.").append(esc(senderUid))
               .append("\" to=\"").append(esc(toAttr)).append("\" time=\"").append(ts(now)).append("\">")
               .append(esc(chatText)).append("</remarks>\n");
             sb.append("  </detail>\n</event>");

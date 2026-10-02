@@ -80,20 +80,24 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     // UI
-    private EditText etCallsign, etDwell, etVoxLeader, etPliRate;
+    private EditText etCallsign, etDwell, etVoxLeader, etPliRate, etAfskLevel;
     private android.widget.Spinner spTxStream, spModem, spSendTo;
     private CheckBox cbTxEnable, cbRxEnable, cbSelfPli, cbChat, cbAlerts, cbShapes,
             cbCasevac, cbSpots;
     private Button btnStartStop;
     private TextView tvStatus, tvLog, tvPliCountdown;
     private boolean pliTickerRunning = false;
-    private View tabSettings, tabDecodes;
-    private Button btnTabSettings, btnTabDecodes, btnDecodesClear;
+    private View tabAudio, tabOptions, tabDecodes;
+    private Button btnTabAudio, btnTabOptions, btnTabDecodes, btnDecodesClear;
     private TextView tvDecodes, tvDecodesCount;
     private android.widget.ScrollView svDecodes;
     private int decodeCount = 0;
 
     private volatile boolean started = false;
+
+    // per-session detailed debug log (created on Start, offered for saving
+    // to Downloads when the user presses Stop Radio Link)
+    private volatile SessionLog sessionLog;
 
     // rate limiting + dedup
     private long lastPliTxMs = 0;
@@ -114,6 +118,12 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
     }
     private final Map<String, PendingAck> rxDmAcks = new LinkedHashMap<>();
     private static final int MAX_ACK_MAP = 200;
+
+    // ATAK callsign -> mesh (ham) callsign, learned from received traffic.
+    // DMs/acks are addressed to ATAK callsigns but mesh routes are keyed by
+    // ham callsigns, so without this map direct sends always fell back to
+    // "no route — sending as broadcast".
+    private final Map<String, String> atakToHamCall = new LinkedHashMap<>();
 
     private static <K, V> void capSize(Map<K, V> map) {
         Iterator<? extends Map.Entry<K, V>> it = map.entrySet().iterator();
@@ -136,7 +146,8 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
         toolbarItem = new ToolbarItem.Builder(
                 pluginContext.getString(R.string.app_name),
                 MarshalManager.marshal(
-                        pluginContext.getResources().getDrawable(R.drawable.ic_launcher),
+                        rasterize(pluginContext.getResources()
+                                .getDrawable(R.drawable.ic_launcher), 192),
                         android.graphics.drawable.Drawable.class,
                         gov.tak.api.commons.graphics.Bitmap.class))
                 .setListener(new ToolbarItemAdapter() {
@@ -146,6 +157,23 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
                     }
                 })
                 .build();
+    }
+
+    /**
+     * Draw any drawable (vectors included) into an ARGB bitmap. The TAK
+     * drawable→bitmap marshaler only handles bitmap-backed drawables, so a
+     * VectorDrawable passed straight in comes out as a blank square — the
+     * same reason renderRadioIcon() rasterizes the radio glyphs.
+     */
+    private android.graphics.drawable.Drawable rasterize(
+            android.graphics.drawable.Drawable d, int px) {
+        android.graphics.Bitmap bmp = android.graphics.Bitmap.createBitmap(
+                px, px, android.graphics.Bitmap.Config.ARGB_8888);
+        android.graphics.Canvas canvas = new android.graphics.Canvas(bmp);
+        d.setBounds(0, 0, px, px);
+        d.draw(canvas);
+        return new android.graphics.drawable.BitmapDrawable(
+                pluginContext.getResources(), bmp);
     }
 
     @Override
@@ -251,7 +279,9 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
     /** Tap on the toolbar radio icon: start/stop the modem. */
     private void toggleRadioFromIcon() {
         if (started) {
+            SessionLog finished = sessionLog;
             stopRadio();
+            promptSaveSessionLog(finished);
             toast("HBC radio link stopped");
         } else {
             if (prefs == null || prefs.getString("callsign", "").isEmpty()) {
@@ -289,6 +319,7 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
         etDwell     = v.findViewById(R.id.hbc_dwell);
         etVoxLeader = v.findViewById(R.id.hbc_vox_leader);
         etPliRate   = v.findViewById(R.id.hbc_pli_rate);
+        etAfskLevel = v.findViewById(R.id.hbc_afsk_level);
         cbTxEnable  = v.findViewById(R.id.hbc_tx_enable);
         cbRxEnable  = v.findViewById(R.id.hbc_rx_enable);
         cbSelfPli   = v.findViewById(R.id.hbc_mode_pli);
@@ -304,11 +335,13 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
         tvLog.setMovementMethod(new ScrollingMovementMethod());
         startPliTicker();
 
-        // tabs
-        tabSettings    = v.findViewById(R.id.hbc_tab_settings);
-        tabDecodes     = v.findViewById(R.id.hbc_tab_decodes);
-        btnTabSettings = v.findViewById(R.id.hbc_tab_btn_settings);
-        btnTabDecodes  = v.findViewById(R.id.hbc_tab_btn_decodes);
+        // tabs: Audio Setup / Options / Decodes
+        tabAudio      = v.findViewById(R.id.hbc_tab_audio);
+        tabOptions    = v.findViewById(R.id.hbc_tab_options);
+        tabDecodes    = v.findViewById(R.id.hbc_tab_decodes);
+        btnTabAudio   = v.findViewById(R.id.hbc_tab_btn_audio);
+        btnTabOptions = v.findViewById(R.id.hbc_tab_btn_options);
+        btnTabDecodes = v.findViewById(R.id.hbc_tab_btn_decodes);
         tvDecodes      = v.findViewById(R.id.hbc_decodes);
         tvDecodesCount = v.findViewById(R.id.hbc_decodes_count);
         svDecodes      = v.findViewById(R.id.hbc_decodes_scroll);
@@ -335,20 +368,23 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
         spSendTo = v.findViewById(R.id.hbc_send_to);
         refreshSendTo();
 
-        btnTabSettings.setOnClickListener(view -> selectTab(false));
-        btnTabDecodes.setOnClickListener(view -> selectTab(true));
+        btnTabAudio.setOnClickListener(view -> selectTab(0));
+        btnTabOptions.setOnClickListener(view -> selectTab(1));
+        btnTabDecodes.setOnClickListener(view -> selectTab(2));
         btnDecodesClear.setOnClickListener(view -> {
             decodeCount = 0;
             tvDecodes.setText("");
             tvDecodesCount.setText(pluginContext.getString(R.string.hbc_decodes_none));
         });
-        selectTab(false);
+        selectTab(0);
 
         loadPrefs();
 
         btnStartStop.setOnClickListener(view -> {
             if (started) {
+                SessionLog finished = sessionLog;
                 stopRadio();
+                promptSaveSessionLog(finished);
             } else {
                 if (validateAndSavePrefs())
                     startRadio();
@@ -422,12 +458,15 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
         tvPliCountdown.setText(text);
     }
 
-    private void selectTab(boolean decodes) {
-        if (tabSettings == null) return;
-        tabSettings.setVisibility(decodes ? View.GONE : View.VISIBLE);
-        tabDecodes.setVisibility(decodes ? View.VISIBLE : View.GONE);
-        btnTabSettings.setEnabled(decodes);
-        btnTabDecodes.setEnabled(!decodes);
+    /** 0 = Audio Setup, 1 = Options, 2 = Decodes */
+    private void selectTab(int tab) {
+        if (tabAudio == null) return;
+        tabAudio.setVisibility(tab == 0 ? View.VISIBLE : View.GONE);
+        tabOptions.setVisibility(tab == 1 ? View.VISIBLE : View.GONE);
+        tabDecodes.setVisibility(tab == 2 ? View.VISIBLE : View.GONE);
+        btnTabAudio.setEnabled(tab != 0);
+        btnTabOptions.setEnabled(tab != 1);
+        btnTabDecodes.setEnabled(tab != 2);
     }
 
     private void loadPrefs() {
@@ -435,6 +474,8 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
         etDwell.setText(String.valueOf(prefs.getInt("dwell_ms", 500)));
         etVoxLeader.setText(String.valueOf(prefs.getInt("vox_leader_ms", 0)));
         etPliRate.setText(String.valueOf(prefs.getInt("pli_rate_s", 60)));
+        if (etAfskLevel != null)
+            etAfskLevel.setText(String.valueOf(prefs.getInt("afsk_tx_level_pct", 50)));
         cbTxEnable.setChecked(prefs.getBoolean("tx_enable", true));
         cbRxEnable.setChecked(prefs.getBoolean("rx_enable", true));
         cbSelfPli.setChecked(prefs.getBoolean("mode_pli", true));
@@ -470,6 +511,8 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
                 .putInt("dwell_ms", intOf(etDwell, 500))
                 .putInt("vox_leader_ms", intOf(etVoxLeader, 0))
                 .putInt("pli_rate_s", intOf(etPliRate, 60))
+                .putInt("afsk_tx_level_pct", etAfskLevel == null ? 50
+                        : Math.max(1, Math.min(100, intOf(etAfskLevel, 50))))
                 .putBoolean("tx_enable", cbTxEnable.isChecked())
                 .putBoolean("rx_enable", cbRxEnable.isChecked())
                 .putBoolean("mode_pli", cbSelfPli.isChecked())
@@ -522,6 +565,17 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
     private synchronized void startRadio() {
         if (started) return;
         try {
+            // fresh detailed session log (replaces any unsaved previous one)
+            sessionLog = new SessionLog(
+                    prefs.getString("callsign", ""), modemName(),
+                    "dwell=" + prefs.getInt("dwell_ms", 500)
+                    + "ms vox=" + prefs.getInt("vox_leader_ms", 0)
+                    + "ms pliRate=" + prefs.getInt("pli_rate_s", 60)
+                    + "s stream=" + prefs.getInt("tx_stream", 0)
+                    + " afskLevel=" + prefs.getInt("afsk_tx_level_pct", 50) + "%"
+                    + " sendTo=" + prefs.getString("send_to", "(broadcast)")
+                    + " tx=" + prefs.getBoolean("tx_enable", true)
+                    + " rx=" + prefs.getBoolean("rx_enable", true));
             switch (modemType()) {
                 case 1:
                     ofdm = new OfdmModem(pluginContext, this);
@@ -540,6 +594,7 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
                     modem.setTxDwellMs(prefs.getInt("dwell_ms", 500));
                     modem.setVoxLeaderMs(prefs.getInt("vox_leader_ms", 0));
                     modem.setTxStreamIndex(prefs.getInt("tx_stream", 0));
+                    modem.setTxLevelPercent(prefs.getInt("afsk_tx_level_pct", 50));
                     modem.start();
                     break;
             }
@@ -596,6 +651,7 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
     private void txFrame(byte[] frame) {
         try {
             String myCall = prefs.getString("callsign", "");
+            sessionDebug("TX mesh frame " + frame.length + " B: " + hex(frame));
             if (ofdm != null)
                 ofdm.transmit(myCall, frame);
             else if (mercury != null)
@@ -605,6 +661,73 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
         } catch (Exception e) {
             log("TX error: " + e);
         }
+    }
+
+    /** Debug-only session log entry (not shown in the Activity Log). */
+    private void sessionDebug(String msg) {
+        Log.d(TAG, msg);
+        SessionLog sl = sessionLog;
+        if (sl != null) sl.debug(msg);
+    }
+
+    private static String hex(byte[] b) {
+        if (b == null) return "(null)";
+        StringBuilder sb = new StringBuilder(b.length * 3);
+        for (byte x : b) sb.append(String.format("%02X ", x));
+        return sb.toString().trim();
+    }
+
+    /**
+     * After Stop Radio Link: offer to save the finished session's detailed
+     * debug log into the device's Downloads folder.
+     */
+    private void promptSaveSessionLog(SessionLog finished) {
+        if (finished == null) return;
+        sessionLog = null;   // session is over either way
+        mainHandler.post(() -> {
+            android.content.Context dlgCtx;
+            try {
+                dlgCtx = com.atakmap.android.maps.MapView.getMapView().getContext();
+            } catch (Throwable t) {
+                dlgCtx = null;
+            }
+            if (dlgCtx == null) {
+                // no UI context available: save unconditionally rather than
+                // silently losing debugging data
+                saveSessionLog(finished);
+                return;
+            }
+            try {
+                new android.app.AlertDialog.Builder(dlgCtx)
+                        .setTitle("Save HBC session log?")
+                        .setMessage("Save the detailed debug log of this radio "
+                                + "session (" + finished.lineCount() + " entries) to\n"
+                                + "Downloads/" + finished.fileName() + "?")
+                        .setPositiveButton("Save", (d, w) -> saveSessionLog(finished))
+                        .setNegativeButton("Discard", (d, w) -> d.dismiss())
+                        .setCancelable(true)
+                        .show();
+            } catch (Throwable t) {
+                saveSessionLog(finished);
+            }
+        });
+    }
+
+    private void saveSessionLog(SessionLog finished) {
+        new Thread(() -> {
+            try {
+                String where = finished.saveToDownloads(
+                        com.atakmap.android.maps.MapView.getMapView() != null
+                                ? com.atakmap.android.maps.MapView.getMapView()
+                                        .getContext()
+                                : pluginContext);
+                log("Session log saved: " + where);
+                toast("HBC session log saved to " + where);
+            } catch (Exception e) {
+                Log.e(TAG, "session log save failed", e);
+                toast("Session log save FAILED: " + e.getMessage());
+            }
+        }, "HBC-SessionLogSave").start();
     }
 
     // ------------------------------------------------------------------
@@ -632,7 +755,7 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
                             prefs.getString("callsign", ""),
                             pa.senderCallsign, kind, pa.tag);
                     // route the chat receipt straight back to the DM sender
-                    mesh.sendDirect(pa.senderCallsign, ack.bytes);
+                    mesh.sendDirect(meshDestFor(pa.senderCallsign), ack.bytes);
                     log("Queued TX mode 0 ack (" + type + ") -> "
                             + pa.senderCallsign + " tag 0x"
                             + String.format("%04X", pa.tag));
@@ -640,13 +763,34 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
                 return;   // receipts are never encoded as normal messages
             }
 
-            if (!modeEnabled(type)) {
+            // Self PLI vs placed marker: the CoT type alone cannot tell a
+            // hostile ground MARKER (a-h-G...) apart from a hostile STATION's
+            // position report — only the UID can. The station's own PLI
+            // carries the ATAK device/self-marker UID; placed markers get
+            // random UUIDs. Previously every a-f/h/n-G event was treated as
+            // a PLI, so placed friendly/hostile/neutral markers were eaten
+            // by the PLI rate limiter and never transmitted at all.
+            boolean groundAtom = type.startsWith("a-f-G")
+                    || type.startsWith("a-h-G") || type.startsWith("a-n-G");
+            boolean selfPli = false;
+            if (groundAtom) {
+                String su = selfUid();
+                selfPli = su != null ? su.equals(event.getUID())
+                        // self marker not available yet: fall back to the
+                        // old heuristic for friendly device-uid events only
+                        : (type.startsWith("a-f-G")
+                           && event.getUID() != null
+                           && event.getUID().startsWith("ANDROID-"));
+            }
+
+            if (!modeEnabled(type, selfPli)) {
                 log("TX skip: type " + type + " disabled in settings");
                 return;
             }
 
-            // PLI rate limit
-            if (type.startsWith("a-f-G") || type.startsWith("a-h-G") || type.startsWith("a-n-G")) {
+            // PLI rate limit — applies ONLY to the station's own position
+            // reports, never to placed markers
+            if (selfPli) {
                 long minInterval = prefs.getInt("pli_rate_s", 60) * 1000L;
                 long now = System.currentTimeMillis();
                 if (now - lastPliTxMs < minInterval) {
@@ -667,11 +811,12 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
             recentTx.put(uid + "|" + type, now);
             pruneOld(recentTx, 300000);
 
-            HbcEncoder.Encoded enc = HbcEncoder.encode(event.toString());
+            HbcEncoder.Encoded enc = HbcEncoder.encode(event.toString(), !selfPli);
 
             if (enc.mode == 3 && enc.chatDestKind == 2 && !enc.chatRecipient.isEmpty()) {
                 // GeoChat DM: automatically route direct to the recipient
-                mesh.sendDirect(enc.chatRecipient, enc.bytes);
+                // (translated to the station's ham callsign when known)
+                mesh.sendDirect(meshDestFor(enc.chatRecipient), enc.bytes);
             } else {
                 String sendTo = prefs.getString("send_to", "");
                 if (!sendTo.isEmpty())
@@ -695,8 +840,8 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
         }
     }
 
-    private boolean modeEnabled(String type) {
-        if (type.startsWith("a-f-G") || type.startsWith("a-h-G") || type.startsWith("a-n-G"))
+    private boolean modeEnabled(String type, boolean selfPli) {
+        if (selfPli)
             return cbOrPref(cbSelfPli, "mode_pli");
         switch (type) {
             case "b-a-o-tbl":
@@ -708,15 +853,30 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
             case "b-r-f-h-c": return cbOrPref(cbCasevac, "mode_casevac");
             default:
                 // Placed markers transmit as spots (Mode 6, Mode 1 fallback):
-                //  - other atom types (a-u-G unknown ground, a-f-A aircraft, ...)
+                //  - ALL atom types, now including placed friendly/hostile/
+                //    neutral ground units (a-f-G/a-h-G/a-n-G markers that are
+                //    NOT this station's own PLI), a-u-G, aircraft, ...
                 //  - b-m-p-* point markers: spot map (b-m-p-s-m), waypoints
-                //    (b-m-p-w), command posts (b-m-p-c-cp), etc. These were
-                //    previously dropped entirely, so colored spot-map markers
-                //    never transmitted at all.
+                //    (b-m-p-w), command posts (b-m-p-c-cp), etc.
                 if (type.startsWith("a-") || type.startsWith("b-m-p"))
                     return cbOrPref(cbSpots, "mode_spots");
                 return false;
         }
+    }
+
+    /** UID of this station's own position marker (ATAK device uid), or null. */
+    private String selfUid() {
+        try {
+            com.atakmap.android.maps.MapView mv =
+                    com.atakmap.android.maps.MapView.getMapView();
+            if (mv != null) {
+                if (mv.getSelfMarker() != null
+                        && mv.getSelfMarker().getUID() != null)
+                    return mv.getSelfMarker().getUID();
+                return com.atakmap.android.maps.MapView.getDeviceUid();
+            }
+        } catch (Throwable ignored) {}
+        return null;
     }
 
     private boolean cbOrPref(CheckBox cb, String key) {
@@ -743,6 +903,8 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
             sivantoledo.ax25.Packet p = new sivantoledo.ax25.Packet(ax25Frame);
             p.parse();
             byte[] payload = p.payload;
+            sessionDebug("RX AX.25 " + ax25Frame.length + " B src=" + p.source
+                    + " dst=" + p.destination + ": " + hex(ax25Frame));
             if (payload == null || payload.length == 0)
                 return;
 
@@ -753,13 +915,15 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
                     : (p.source.contains("-")
                             ? p.source.substring(0, p.source.indexOf('-'))
                             : p.source);
-            if (srcBase.equalsIgnoreCase(myCall))
+            if (srcBase.equalsIgnoreCase(myCall)) {
+                sessionDebug("RX dropped: own transmission echoed back");
                 return;
+            }
 
             if (mesh != null)
                 mesh.onRadioFrame(payload);
         } catch (Exception e) {
-            Log.d(TAG, "RX frame not mesh: " + e.getMessage());
+            sessionDebug("RX frame not mesh: " + e.getMessage());
         }
     }
 
@@ -785,14 +949,18 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
             recentRx.put(hash, now);
             pruneOld(recentRx, 300000);
 
+            sessionDebug("RX mesh frame " + meshFrame.length + " B (meta call '"
+                    + callsign + "'): " + hex(meshFrame));
             String myCall = prefs.getString("callsign", "");
-            if (!callsign.isEmpty() && callsign.equalsIgnoreCase(myCall))
+            if (!callsign.isEmpty() && callsign.equalsIgnoreCase(myCall)) {
+                sessionDebug("RX dropped: own transmission heard back");
                 return; // our own transmission heard back
+            }
 
             if (mesh != null)
                 mesh.onRadioFrame(meshFrame);
         } catch (Exception e) {
-            Log.d(TAG, "RX payload not mesh: " + e.getMessage());
+            sessionDebug("RX payload not mesh: " + e.getMessage());
         }
     }
 
@@ -803,6 +971,8 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
     private void handleHbcRx(String origin, byte[] hbcPayload) {
         try {
             HbcDecoder.Decoded dec = HbcDecoder.decode(hbcPayload);
+            sessionDebug("RX HBC payload " + hbcPayload.length + " B from '"
+                    + origin + "': " + hex(hbcPayload) + " -> " + dec.summary());
 
             String myCall = prefs.getString("callsign", "");
             if (dec.callsign.equalsIgnoreCase(myCall))
@@ -815,6 +985,14 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
                     return;
             } catch (Exception ignored) {}
 
+            // learn ATAK callsign -> ham (mesh) callsign for DM/ack routing
+            if (!dec.callsign.isEmpty() && origin != null && !origin.isEmpty()
+                    && !dec.callsign.equalsIgnoreCase(origin)) {
+                atakToHamCall.put(dec.callsign.toUpperCase(Locale.US),
+                        origin.toUpperCase(Locale.US));
+                capSize(atakToHamCall);
+            }
+
             if (dec.mode == 0) {
                 handleAckRx(dec);
                 return;
@@ -822,7 +1000,15 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
             if (!resolveDirectMessage(dec))
                 return;
 
+            // avoid a duplicated contacts-list row when the station is also
+            // reachable over a normal ATAK network link (WiFi / TAK server)
+            if (dec.mode == 1 && !dec.isSpot) {
+                dec.suppressEndpoint = hasLiveNetworkContact(dec);
+                removeGhostChatContact(dec.callsign);
+            }
+
             String xml = dec.toXml();
+            sessionDebug("RX reconstructed CoT:\n" + xml);
             CotEvent event = CotEvent.parse(xml);
             if (event == null || !event.isValid()) {
                 log("RX decode produced invalid CoT (" + dec.summary() + ")");
@@ -835,8 +1021,67 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
                     + "\n  " + dec.summary()
                     + "\n  " + hbcPayload.length + " B payload");
         } catch (Exception e) {
-            Log.d(TAG, "RX payload not HBC: " + e.getMessage());
+            sessionDebug("RX payload not HBC: " + e.getMessage());
         }
+    }
+
+    /**
+     * Remove the ghost chat contact "BAO.F.HBC.HBC-<CALL>" that older
+     * builds caused ATAK to fabricate (chat remarks source used the
+     * BAO.F.HBC. prefix, which ATAK's parser treats as a literal sender
+     * uid). It duplicated the station in the contacts list and split the
+     * DM conversation across two windows. New chats use the BAO.F.ATAK.
+     * prefix and resolve to the real HBC-<CALL> contact; this cleans up
+     * leftovers on devices that chatted with the old builds.
+     */
+    private void removeGhostChatContact(String callsign) {
+        try {
+            String ghost = "BAO.F.HBC.HBC-" + callsign.toUpperCase(Locale.US);
+            com.atakmap.android.contact.Contacts cts =
+                    com.atakmap.android.contact.Contacts.getInstance();
+            if (cts.getContactByUuid(ghost) != null) {
+                cts.removeContactByUuid(ghost);
+                log("Removed stale chat contact " + ghost);
+            }
+        } catch (Throwable ignored) {
+            // Contacts API unavailable — harmless, contact just lingers
+        }
+    }
+
+    /**
+     * True when ATAK already lists a live contact with this station's
+     * callsign from a normal network channel (WiFi / TAK server). Injecting
+     * our mesh endpoint as well would show the callsign twice in the
+     * contacts list, so the caller suppresses the endpoint in that case.
+     */
+    private boolean hasLiveNetworkContact(HbcDecoder.Decoded dec) {
+        try {
+            String want1 = dec.name == null ? "" : dec.name.trim();
+            String want2 = dec.callsign == null ? "" : dec.callsign.trim();
+            java.util.List<com.atakmap.android.contact.Contact> all =
+                    com.atakmap.android.contact.Contacts.getInstance()
+                            .getAllContacts();
+            if (all == null) return false;
+            for (com.atakmap.android.contact.Contact c : all) {
+                if (c == null) continue;
+                String uid = c.getUID();
+                String nm = c.getName();
+                if (uid == null || nm == null) continue;
+                // skip our own injections AND GeoChat-derived entries for
+                // them (e.g. BAO.F.HBC.HBC-KEYSTONE created after a DM) —
+                // only a real network contact should suppress the endpoint
+                if (uid.contains("HBC-")) continue;
+                if ((!want1.isEmpty() && nm.equalsIgnoreCase(want1))
+                        || (!want2.isEmpty() && nm.equalsIgnoreCase(want2))) {
+                    sessionDebug("RX PLI: '" + nm + "' already a network "
+                            + "contact (uid " + uid + ") - endpoint suppressed");
+                    return true;
+                }
+            }
+        } catch (Throwable ignored) {
+            // Contacts API unavailable: keep the endpoint (default behavior)
+        }
+        return false;
     }
 
     /**
@@ -866,8 +1111,8 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
                     com.atakmap.android.maps.MapView.getMapView();
             if (mv != null) atakCallsign = mv.getDeviceCallsign();
         } catch (Exception ignored) {}
-        boolean forUs = dec.ackRecipient.equalsIgnoreCase(myCall)
-                || (atakCallsign != null && dec.ackRecipient.equalsIgnoreCase(atakCallsign));
+        boolean forUs = callsignMatches(dec.ackRecipient, myCall)
+                || (atakCallsign != null && callsignMatches(dec.ackRecipient, atakCallsign));
         if (!forUs) {
             log("RX ack for '" + dec.ackRecipient + "' — not this station, ignored");
             return;
@@ -917,8 +1162,8 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
             }
         } catch (Exception ignored) {}
 
-        boolean forUs = recipient.equalsIgnoreCase(myCall)
-                || (atakCallsign != null && recipient.equalsIgnoreCase(atakCallsign));
+        boolean forUs = callsignMatches(recipient, myCall)
+                || (atakCallsign != null && callsignMatches(recipient, atakCallsign));
         if (!forUs) {
             log("RX chat: DM for '" + recipient + "' — not this station, ignored");
             return false;
@@ -926,6 +1171,39 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
         if (deviceUid != null && !deviceUid.isEmpty())
             dec.chatRecipientUidOverride = deviceUid;
         return true;
+    }
+
+    /**
+     * True when `recipient` names `local`, tolerating the HBC wire-format
+     * truncation: the Mode 1 name field holds 7 chars and the ITA2 callsign
+     * fields 8, so "KEYSTON"/"KEYSTONE" must still match a local callsign
+     * "KEYSTONE1". A recipient long enough to have filled a field (≥ 7
+     * chars) matches when it is a prefix of the local callsign; shorter
+     * recipients must match exactly.
+     */
+    private static boolean callsignMatches(String recipient, String local) {
+        if (recipient == null || local == null) return false;
+        String r = recipient.trim().toUpperCase(Locale.US);
+        String l = local.trim().toUpperCase(Locale.US);
+        if (r.isEmpty() || l.isEmpty()) return false;
+        if (r.equals(l)) return true;
+        return r.length() >= 7 && l.startsWith(r);
+    }
+
+    /**
+     * Translate a DM/ack destination (an ATAK callsign) into the station's
+     * ham callsign for mesh routing, when learned from received traffic.
+     * Falls back to the input unchanged (mesh then broadcasts).
+     */
+    private String meshDestFor(String callsign) {
+        if (callsign == null || callsign.isEmpty()) return callsign;
+        String key = callsign.trim().toUpperCase(Locale.US);
+        String ham = atakToHamCall.get(key);
+        if (ham != null) return ham;
+        if (key.length() >= 7)
+            for (Map.Entry<String, String> e : atakToHamCall.entrySet())
+                if (e.getKey().startsWith(key)) return e.getValue();
+        return callsign;
     }
 
     private static <K> void pruneOld(Map<K, Long> map, long maxAgeMs) {
@@ -941,6 +1219,8 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
     // ------------------------------------------------------------------
     private void log(String msg) {
         Log.d(TAG, msg);
+        SessionLog sl = sessionLog;
+        if (sl != null) sl.info(msg);
         mainHandler.post(() -> {
             if (tvLog != null) {
                 String stamp = new SimpleDateFormat("HH:mm:ss", Locale.US).format(new Date());

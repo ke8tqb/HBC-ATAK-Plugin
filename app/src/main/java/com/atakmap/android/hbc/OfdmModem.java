@@ -66,6 +66,9 @@ public class OfdmModem {
     private final Object txLock = new Object();
     private final CsmaSense csma = new CsmaSense();
 
+    // input effects we explicitly disabled; kept referenced while running
+    private final List<android.media.audiofx.AudioEffect> rxEffects = new ArrayList<>();
+
     public OfdmModem(Context context, PayloadListener listener) {
         this.context = context;
         this.listener = listener;
@@ -308,14 +311,15 @@ public class OfdmModem {
                         AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT,
                         bufSize);
                 if (r.getState() == AudioRecord.STATE_INITIALIZED) {
+                    String fx = RxAudioEffects.disable(r, rxEffects);
                     AudioDeviceInfo usbIn = findUsbDevice(false);
                     if (usbIn != null) {
                         r.setPreferredDevice(usbIn);
                         listener.onStatus("RX audio source: " + names[i]
-                                + " via USB (" + usbIn.getProductName() + ")");
+                                + " via USB (" + usbIn.getProductName() + ")" + fx);
                     } else {
                         listener.onStatus("RX audio source: " + names[i]
-                                + " (built-in mic)");
+                                + " (built-in mic)" + fx);
                     }
                     return r;
                 }
@@ -403,6 +407,7 @@ public class OfdmModem {
         } catch (Exception e) {
             listener.onStatus("RX thread failed: " + e.getMessage());
         } finally {
+            RxAudioEffects.release(rxEffects);
             if (record != null) {
                 try { record.release(); } catch (Exception ignored) {}
             }

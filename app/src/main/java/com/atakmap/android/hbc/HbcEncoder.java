@@ -118,6 +118,21 @@ public final class HbcEncoder {
 
     /** Encode a CoT XML event string into HBC bytes. */
     public static Encoded encode(String cotXml) throws HbcEncodeException {
+        return encode(cotXml, false);
+    }
+
+    /**
+     * Encode a CoT XML event string into HBC bytes.
+     *
+     * @param preferSpot treat an atom-type event (a-f-G / a-h-G / a-n-G
+     *        included) as a PLACED MARKER rather than a self position
+     *        report: try the Mode 6 extended-marker encoding first and,
+     *        on fallback, set the Mode 1 spot flag. The caller decides
+     *        (by UID) whether an event is the station's own PLI — the
+     *        CoT type alone cannot distinguish a hostile ground marker
+     *        from a hostile station's position report.
+     */
+    public static Encoded encode(String cotXml, boolean preferSpot) throws HbcEncodeException {
         if (cotXml == null)
             throw new HbcEncodeException("CoT XML is null");
         // CoT events never carry a DTD. Rejecting DOCTYPE outright blocks
@@ -159,7 +174,7 @@ public final class HbcEncoder {
         Element detail = child(root, "detail");
 
         int mode = detectMode(cotType);
-        if (mode == 1 && isSpot(cotType)) {
+        if (mode == 1 && (preferSpot || isSpot(cotType))) {
             // Prefer Mode 6 (extended marker) for placed markers so the
             // symbol/icon survives; fall back to Mode 1 when unencodable.
             try {
@@ -169,7 +184,7 @@ public final class HbcEncoder {
             }
         }
         switch (mode) {
-            case 1:  return mode1(cotType, detail, lat, lon);
+            case 1:  return mode1(cotType, detail, lat, lon, preferSpot);
             case 2:  return mode2(cotType, detail, lat, lon);
             case 3:  return mode3(cotType, detail);
             case 4:  return mode4(cotType, detail, lat, lon);
@@ -230,7 +245,8 @@ public final class HbcEncoder {
     // ------------------------------------------------------------------
     // Mode 1 — PLI / Spot
     // ------------------------------------------------------------------
-    private static Encoded mode1(String cotType, Element detail, double lat, double lon)
+    private static Encoded mode1(String cotType, Element detail, double lat, double lon,
+                                 boolean forceSpot)
             throws HbcEncodeException {
         String callsign = "", name = "";
         if (detail != null) {
@@ -248,7 +264,7 @@ public final class HbcEncoder {
         }
         if (name.isEmpty()) name = callsign;
 
-        boolean spot = isSpot(cotType);
+        boolean spot = forceSpot || isSpot(cotType);
         int affiliation = detectAffiliation(cotType);
         BitWriter w = header(callsign, 1);
         w.bits(spot ? 1 : 0, 1);

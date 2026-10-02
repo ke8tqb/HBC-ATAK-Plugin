@@ -4,7 +4,119 @@ All notable changes to HBC Audio Plugin are documented here.
 
 ---
 
-## [Unreleased]
+## [0.21] — Field-test fixes (10-02 campaign) + session debug log
+
+Fixes for the three failures found in the 10-02-26 PLI test campaign:
+
+- **Placed friendly/hostile/neutral markers now transmit.** Every
+  `a-f-G/a-h-G/a-n-G` event used to be treated as a self position
+  report, so placed markers of those affiliations were swallowed by the
+  PLI rate limiter (and reset it) — only `a-u-G` markers ever went out.
+  Self-PLI is now identified by the ATAK device/self-marker UID; placed
+  markers of any affiliation take the spots path (Mode 6 extended
+  marker first, Mode 1 spot-flag fallback — wire format unchanged).
+  New `HbcEncoder.encode(xml, preferSpot)` overload carries the
+  distinction; the PLI rate limiter applies only to the real self PLI.
+- **AFSK1200 receive hardening.** The DSP chain verifies clean on the
+  JVM (modulate→demodulate→parse round trip at 48/44.1/22.05 kHz), so
+  the on-phone "TX fine, RX never decodes" failure points at device
+  audio processing: input noise suppressors notch out steady 1200/2200
+  Hz tones (noise-like OFDM survives, pure-tone AFSK dies). AFSK RX now
+  prefers the UNPROCESSED source, and all three modems explicitly
+  disable NoiseSuppressor/AGC/AEC on their record session (status line
+  shows e.g. `RX audio source: UNPROCESSED (built-in mic), NS/AGC
+  off`). AFSK TX drive raised 0.4 → 0.5 (parity with OFDM) and a new
+  diagnostic logs "AFSK: heard a signal but decoded no frame" when
+  carrier energy came and went without a decode.
+- **AFSK minimum TX preamble.** Session logs from the field (the new
+  diagnostic above) showed both stations *hearing* each AFSK burst but
+  never decoding — with `TX Dwell` set to 0 ms the transmission carried
+  only ~2 HDLC flags (~13 ms) of preamble, far too short for the
+  receiver's clock recovery over an acoustic path (OFDM/Mercury carry
+  their own long sync preambles and were unaffected). AFSK now enforces
+  a 300 ms minimum flag preamble (the classic TNC TXDelay default)
+  regardless of the dwell setting and logs when it clamps; dwell values
+  above 300 ms behave exactly as before.
+- **AFSK TX level setting.** New "AFSK TX level %" field in settings
+  (1–100, default 50 = previous fixed drive) scales the rendered AFSK
+  waveform before playback — AX.25 modem only, OFDM/Mercury unchanged.
+  At close acoustic range full-volume FSK tones overdrive the speaker
+  and/or clip the receiving mic (and with NS/AGC now disabled on RX,
+  nothing tames clipped input), distorting the tones beyond decoding —
+  the preamble-fix retest still decoded nothing while both sides logged
+  "heard a signal but decoded no frame". Lower the level (e.g. 20–30%)
+  when stations sit close together. The active level is echoed in the
+  "Modem started" line and the session-log settings header. Note: the
+  default Alarm TX stream is loudness-normalized by many OEMs, which
+  can cancel digital level changes — switch "TX audio stream" to Media
+  when tuning speaker-to-mic levels.
+- **AFSK RX burst level meter.** Every heard burst now logs its
+  measured input level, e.g. `AFSK RX burst 1040 ms: peak 99%, RMS 62%
+  — CLIPPING: lower TX level/volume or move apart`, with a VERY LOW
+  hint under 5% peak. This separates the three failure modes — input
+  clipping, too-quiet input, and clean-but-undecodable tones — directly
+  in the session log.
+- **Duplicated contact rows.** When both stations also share a normal
+  network link (WiFi/TAK server), the station appeared twice in the
+  contacts list — once from ATAK's own network contact and once from
+  the HBC-injected PLI endpoint. The plugin now suppresses the mesh
+  endpoint when a live non-HBC contact with the same callsign already
+  exists (radio-only operation is unchanged: endpoint still injected).
+  GeoChat-derived entries for HBC stations (uids like
+  `BAO.F.HBC.HBC-…`, created after a DM) no longer count as network
+  contacts for this check.
+- **DM replies to stations with long callsigns were dropped.** Field
+  logs: a DM to KEYSTONE went out addressed to `KEYSTON` and the
+  station logged "RX chat: DM for 'KEYSTON' — not this station,
+  ignored". The Mode 1 name field truncates at 7 chars, so the
+  receiving side's contact for an 8-char station was created under the
+  truncated name and every reply inherited it. Three fixes, no wire
+  change: (1) injected PLI contacts now display the full station
+  callsign when the name field is just its truncated prefix; (2)
+  DM/ack recipient matching tolerates field-width truncation (a ≥7-char
+  recipient matches a local callsign it prefixes); (3) DMs and acks now
+  translate the ATAK callsign to the station's ham callsign (learned
+  from received traffic) so the mesh routes them Direct instead of
+  falling back to "no route — sending as broadcast".
+- **DM conversations no longer split across two windows / two
+  contacts.** Injected chat used `remarks source="BAO.F.HBC.HBC-<CALL>"`,
+  but ATAK's ChatMessageParser only strips the `BAO.F.ATAK.` /
+  `BAO.F.WinTAK.` prefixes — anything else is taken verbatim as the
+  sender uid. ATAK therefore fabricated a second contact
+  (`BAO.F.HBC.HBC-<CALL>`, the duplicate row in the contacts list even
+  with no IP network) and filed incoming DMs into its window, while
+  replies went out from the real `HBC-<CALL>` contact's window — so a
+  station could never "respond in the correct window". Chat CoT now
+  uses the `BAO.F.ATAK.` prefix, making ATAK resolve the sender to the
+  PLI-injected contact: one contact, one window, both directions.
+  Receiving a PLI also removes any leftover `BAO.F.HBC.HBC-*` ghost
+  contact created by earlier builds.
+
+UI overhaul:
+
+- **Three-tab layout.** The pane is reorganized into **Audio Setup**
+  (modem selection, TX audio stream, AFSK TX level, TX dwell, VOX
+  lead), **Options** (callsign, mesh Send-to, PLI rate, Transmit /
+  Receive enables, message-type selection), and **Decodes** — which now
+  shows two areas: the simple Packet Decodes list on top and the
+  detailed Live Activity Log below it. Title, status line, Next-PLI
+  countdown, and the Start/Stop Radio Link button moved to a persistent
+  header visible from every tab.
+- **New plugin icon.** The template's stock Android robot is replaced
+  with a professional badge: dark graphite rounded square, white radio
+  tower, green signal arcs (matching the radio-link toolbar green).
+  Shown in ATAK's Tools menu, the plugin manager, and the toolbar.
+
+New debugging feature:
+
+- **Per-session debug log.** Every radio session records a detailed log
+  (all Activity Log lines plus raw TX/RX frame hex, decoder output,
+  reconstructed CoT XML, drop reasons, millisecond timestamps). On
+  **Stop Radio Link** the plugin asks "Save HBC session log?" and, on
+  Save, writes `HBC_<CALL>_<MODEM>_<yyyy-MM-dd_HH-mm-ss>.log` into the
+  phone's Downloads folder (session start time in the name).
+
+Also landed since 0.20 (previously tracked as unreleased):
 
 - prebuilt/: added the TAK Product Center production-signed 0.20
   civ-release APKs for ATAK 5.7.0 and 5.8.0 (third-party pipeline

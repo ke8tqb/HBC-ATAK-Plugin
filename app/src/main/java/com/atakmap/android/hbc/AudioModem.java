@@ -50,9 +50,16 @@ public class AudioModem {
 
     public static final int SAMPLE_RATE = 48000;
 
-    private static final double TX_AMPLITUDE = 0.4;   // fraction of full scale
+    private static final double TX_AMPLITUDE = 0.5;   // fraction of full scale (parity with OFDM)
     private static final int LEAD_SILENCE_MS = 150;   // absorbed by device fade-in
     private static final int TAIL_SILENCE_MS = 250;   // keeps VOX keyed till frame end
+
+    // Minimum HDLC flag preamble actually transmitted, regardless of the TX
+    // Dwell setting. The acoustic path (speaker ramp, mic settle, demod clock
+    // recovery) needs a run of flags to lock; dwell=0 would otherwise yield
+    // ~2 flags (~13 ms) and the receiver hears the burst but never syncs.
+    // 300 ms (~45 flags) is the classic TNC TXDelay default.
+    private static final int MIN_PREAMBLE_MS = 300;
 
     private final FrameListener listener;
     private final Context context;
@@ -67,10 +74,30 @@ public class AudioModem {
     private volatile int txDwellMs = 500;   // HDLC flag preamble (TXDelay)
     private volatile int voxLeaderMs = 0;   // steady mark tone before preamble
     private volatile int txStream = AudioManager.STREAM_ALARM;
+    private volatile double txLevel = TX_AMPLITUDE; // user-set TX drive (0.01..1.0)
 
     private final Deque<Packet> txQueue = new ArrayDeque<>();
     private final Object txLock = new Object();
     private final CsmaSense csma = new CsmaSense();
+
+    // RX diagnostics: when the carrier sense heard a signal but the
+    // demodulator produced no frame, say so (helps separate "no audio"
+    // from "audio present but undecodable" in the field).
+    private volatile long lastFrameMs = 0;
+    private long lastNoDecodeLogMs = 0;
+    private boolean chWasBusy = false;
+    private long busyStartMs = 0;
+
+    // level stats for the current busy period (RX burst): tells clipping
+    // (peak pinned at 100%) apart from too-quiet (peak a few %) in the field
+    private float busyPeak = 0;
+    private double busySumSq = 0;
+    private long busySamples = 0;
+
+    // input effects we explicitly disabled; kept referenced while running
+    private final List<android.media.audiofx.AudioEffect> rxEffects = new ArrayList<>();
+
+    private volatile boolean warnedDwellClamp = false;
 
     public AudioModem(Context context, FrameListener listener) {
         this.context = context;
@@ -97,6 +124,16 @@ public class AudioModem {
 
     public void setTxDwellMs(int ms) {
         txDwellMs = Math.max(0, ms);
+    }
+
+    /**
+     * TX audio drive as a percentage of full scale (1..100). Close-range
+     * acoustic coupling overdrives the speaker and/or clips the peer's mic
+     * (with NS/AGC disabled nothing tames it), which distorts the FSK tones
+     * beyond decoding \u2014 lowering the level is the fix.
+     */
+    public void setTxLevelPercent(int pct) {
+        txLevel = Math.max(1, Math.min(100, pct)) / 100.0;
     }
 
     public void setVoxLeaderMs(int ms) {
@@ -148,6 +185,7 @@ public class AudioModem {
         demodulator = new Afsk1200MultiDemodulator(SAMPLE_RATE, new PacketHandler() {
             @Override
             public void handlePacket(byte[] bytes) {
+                lastFrameMs = System.currentTimeMillis();
                 listener.onFrame(bytes);
             }
         });
@@ -163,7 +201,7 @@ public class AudioModem {
         txThread.start();
 
         listener.onStatus("Modem started (AFSK1200 @ " + SAMPLE_RATE
-                + " Hz, alarm-stream TX)");
+                + " Hz, TX level " + Math.round(txLevel * 100) + "%)");
     }
 
     public synchronized void stop() {
@@ -220,8 +258,15 @@ public class AudioModem {
 
         // preamble + frame, rendered at the native output rate so the OS
         // resampler never touches the waveform (APRSdroid technique)
+        int effDwellMs = Math.max(MIN_PREAMBLE_MS, txDwellMs);
+        if (effDwellMs != txDwellMs && !warnedDwellClamp) {
+            warnedDwellClamp = true;
+            listener.onStatus("AFSK: TX dwell " + txDwellMs
+                    + " ms too short for RX sync \u2014 using "
+                    + MIN_PREAMBLE_MS + " ms preamble");
+        }
         Afsk1200Modulator txMod = new Afsk1200Modulator(outRate);
-        txMod.setTxDelay(Math.max(1, txDwellMs / 10)); // 10 ms units
+        txMod.setTxDelay(Math.max(1, effDwellMs / 10)); // 10 ms units
         txMod.prepareToTransmit(packet);
         float[] buf = txMod.getTxSamplesBuffer();
         int n;
@@ -239,9 +284,10 @@ public class AudioModem {
 
         short[] pcm = new short[total];
         int off = 0;
+        double amp = txLevel;
         for (float[] c : chunks) {
             for (float v : c)
-                pcm[off++] = (short) (v * TX_AMPLITUDE * 32767.0);
+                pcm[off++] = (short) (v * amp * 32767.0);
         }
         return pcm;
     }
@@ -331,14 +377,17 @@ public class AudioModem {
         int minBuf = AudioRecord.getMinBufferSize(SAMPLE_RATE,
                 AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
         int bufSize = Math.max(minBuf, SAMPLE_RATE);
+        // UNPROCESSED first: AFSK is pure narrowband tones, and OEM noise
+        // suppression attached to VOICE_RECOGNITION on some devices notches
+        // steady tones out entirely (OFDM survives it, AFSK does not).
         int[] sources = (Build.VERSION.SDK_INT >= 24)
-                ? new int[]{MediaRecorder.AudioSource.VOICE_RECOGNITION,
-                            MediaRecorder.AudioSource.UNPROCESSED,
+                ? new int[]{MediaRecorder.AudioSource.UNPROCESSED,
+                            MediaRecorder.AudioSource.VOICE_RECOGNITION,
                             MediaRecorder.AudioSource.MIC}
                 : new int[]{MediaRecorder.AudioSource.VOICE_RECOGNITION,
                             MediaRecorder.AudioSource.MIC};
         String[] names = (Build.VERSION.SDK_INT >= 24)
-                ? new String[]{"VOICE_RECOGNITION", "UNPROCESSED", "MIC"}
+                ? new String[]{"UNPROCESSED", "VOICE_RECOGNITION", "MIC"}
                 : new String[]{"VOICE_RECOGNITION", "MIC"};
         for (int i = 0; i < sources.length; i++) {
             try {
@@ -346,14 +395,15 @@ public class AudioModem {
                         AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT,
                         bufSize);
                 if (r.getState() == AudioRecord.STATE_INITIALIZED) {
+                    String fx = RxAudioEffects.disable(r, rxEffects);
                     AudioDeviceInfo usbIn = findUsbDevice(false);
                     if (usbIn != null) {
                         r.setPreferredDevice(usbIn);
                         listener.onStatus("RX audio source: " + names[i]
-                                + " via USB (" + usbIn.getProductName() + ")");
+                                + " via USB (" + usbIn.getProductName() + ")" + fx);
                     } else {
                         listener.onStatus("RX audio source: " + names[i]
-                                + " (built-in mic)");
+                                + " (built-in mic)" + fx);
                     }
                     return r;
                 }
@@ -385,14 +435,59 @@ public class AudioModem {
                 if (n <= 0) continue;
                 if (transmitting) continue; // half duplex: ignore our own audio
                 csma.feed(pcm, n);          // CSMA carrier sense
-                for (int i = 0; i < n; i++)
-                    samples[i] = pcm[i] / 32768.0f;
+                float chunkPeak = 0;
+                double chunkSumSq = 0;
+                for (int i = 0; i < n; i++) {
+                    float v = pcm[i] / 32768.0f;
+                    samples[i] = v;
+                    float a = v < 0 ? -v : v;
+                    if (a > chunkPeak) chunkPeak = a;
+                    chunkSumSq += (double) v * v;
+                }
                 demodulator.addSamples(samples, n);
+
+                // diagnostic: a signal was heard, then the channel went
+                // quiet, and the whole busy period produced no frame
+                boolean busy = csma.isBusy();
+                long nowMs = System.currentTimeMillis();
+                if (busy && !chWasBusy) {
+                    busyStartMs = nowMs;
+                    busyPeak = 0;
+                    busySumSq = 0;
+                    busySamples = 0;
+                }
+                if (busy || chWasBusy) {
+                    if (chunkPeak > busyPeak) busyPeak = chunkPeak;
+                    busySumSq += chunkSumSq;
+                    busySamples += n;
+                }
+                if (!busy && chWasBusy && nowMs - busyStartMs > 300) {
+                    int pk = Math.round(busyPeak * 100f);
+                    int rms = busySamples > 0 ? (int) Math.round(
+                            Math.sqrt(busySumSq / busySamples) * 100) : 0;
+                    String hint = busyPeak >= 0.98f
+                            ? " \u2014 CLIPPING: lower TX level/volume or move apart"
+                            : busyPeak < 0.05f
+                            ? " \u2014 VERY LOW: raise volume or move closer"
+                            : "";
+                    listener.onStatus("AFSK RX burst " + (nowMs - busyStartMs)
+                            + " ms: peak " + pk + "%, RMS " + rms + "%" + hint);
+                }
+                if (!busy && chWasBusy
+                        && lastFrameMs < busyStartMs
+                        && nowMs - busyStartMs > 700
+                        && nowMs - lastNoDecodeLogMs > 30000) {
+                    lastNoDecodeLogMs = nowMs;
+                    listener.onStatus("AFSK: heard a signal but decoded no "
+                            + "frame (check RX level/distortion)");
+                }
+                chWasBusy = busy;
             }
             record.stop();
         } catch (Exception e) {
             listener.onStatus("RX thread failed: " + e.getMessage());
         } finally {
+            RxAudioEffects.release(rxEffects);
             if (record != null) {
                 try { record.release(); } catch (Exception ignored) {}
             }

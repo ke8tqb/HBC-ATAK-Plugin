@@ -30,19 +30,23 @@
     <string name="hbc_mode_shapes">Shapes</string>
     <string name="hbc_mode_casevac">CASEVAC</string>
     <string name="hbc_start">Start Radio Link</string>
-    <string name="hbc_log_label">Activity Log</string>
-    <string name="hbc_tab_settings">Settings</string>
+    <string name="hbc_log_label">Live Activity Log</string>
+    <string name="hbc_tab_audio">Audio Setup</string>
+    <string name="hbc_tab_options">Options</string>
     <string name="hbc_tab_decodes">Decodes</string>
+    <string name="hbc_txrx_label">Transmit / Receive</string>
     <string name="hbc_decodes_title">Packet Decodes</string>
     <string name="hbc_decodes_clear">Clear</string>
     <string name="hbc_decodes_none">No packets decoded yet</string>
     <string name="hbc_modem_label">Modem (must match on all stations!)</string>
     <string-array name="hbc_modem_options">
-        <item>AFSK1200 / AX.25 (packet radio compatible)</item>
-        <item>OFDM COFDMTV (rattlegram; robust, no digipeating)</item>
-        <item>Mercury HF (FreeDV DATAC4; SSB/HF, very low SNR)</item>
+        <item>AX.25/APRS</item>
+        <item>OFDM (Rattlegram)</item>
+        <item>Mercury</item>
     </string-array>
     <string name="hbc_stream_label">TX audio stream (try others if your device distorts tones)</string>
+    <string name="hbc_afsk_level_label">AFSK TX level % (1–100; lower it if the receiver hears you but can\'t decode — AX.25 modem only)</string>
+    <string name="hbc_afsk_level_default">50</string>
     <string-array name="hbc_stream_options">
         <item>Alarm (bypasses media effects)</item>
         <item>Media</item>

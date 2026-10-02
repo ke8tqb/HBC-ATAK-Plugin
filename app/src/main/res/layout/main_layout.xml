@@ -4,6 +4,44 @@
     android:layout_height="match_parent"
     android:orientation="vertical">
 
+    <!-- Persistent header: title, status, PLI countdown, Start/Stop.
+         Visible on every tab so the radio can always be controlled. -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingLeft="8dp"
+        android:paddingRight="8dp"
+        android:paddingTop="8dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/hbc_title"
+            android:textStyle="bold"
+            android:textSize="16sp" />
+
+        <TextView
+            android:id="@+id/hbc_status"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/hbc_stopped" />
+
+        <TextView
+            android:id="@+id/hbc_pli_countdown"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/hbc_pli_countdown_idle"
+            android:textSize="12sp"
+            android:paddingBottom="4dp" />
+
+        <Button
+            android:id="@+id/hbc_start_stop"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/hbc_start" />
+    </LinearLayout>
+
     <!-- Tab bar -->
     <LinearLayout
         android:layout_width="match_parent"
@@ -11,11 +49,18 @@
         android:orientation="horizontal">
 
         <Button
-            android:id="@+id/hbc_tab_btn_settings"
+            android:id="@+id/hbc_tab_btn_audio"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="@string/hbc_tab_settings" />
+            android:text="@string/hbc_tab_audio" />
+
+        <Button
+            android:id="@+id/hbc_tab_btn_options"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/hbc_tab_options" />
 
         <Button
             android:id="@+id/hbc_tab_btn_decodes"
@@ -25,9 +70,9 @@
             android:text="@string/hbc_tab_decodes" />
     </LinearLayout>
 
-    <!-- ============== SETTINGS TAB ============== -->
+    <!-- ============== AUDIO SETUP TAB ============== -->
     <ScrollView
-        android:id="@+id/hbc_tab_settings"
+        android:id="@+id/hbc_tab_audio"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:visibility="visible">
@@ -41,46 +86,35 @@
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="@string/hbc_title"
-                android:textStyle="bold"
-                android:textSize="16sp" />
-
-            <TextView
-                android:id="@+id/hbc_status"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="@string/hbc_stopped" />
-
-            <TextView
-                android:id="@+id/hbc_pli_countdown"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="@string/hbc_pli_countdown_idle"
-                android:textSize="12sp"
-                android:paddingBottom="6dp" />
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="@string/hbc_callsign_label" />
-
-            <EditText
-                android:id="@+id/hbc_callsign"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:hint="@string/hbc_callsign_hint"
-                android:inputType="textCapCharacters"
-                android:maxLength="8" />
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="@string/hbc_send_to_label" />
+                android:text="@string/hbc_modem_label" />
 
             <com.atakmap.android.gui.PluginSpinner
-                android:id="@+id/hbc_send_to"
+                android:id="@+id/hbc_modem_type"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/hbc_stream_label" />
+
+            <com.atakmap.android.gui.PluginSpinner
+                android:id="@+id/hbc_tx_stream"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/hbc_afsk_level_label" />
+
+            <EditText
+                android:id="@+id/hbc_afsk_level"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="number"
+                android:maxLength="3"
+                android:text="@string/hbc_afsk_level_default" />
 
             <LinearLayout
                 android:layout_width="match_parent"
@@ -124,54 +158,71 @@
                         android:inputType="number"
                         android:text="@string/hbc_vox_default" />
                 </LinearLayout>
-
-                <LinearLayout
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:orientation="vertical">
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="@string/hbc_pli_rate_label" />
-
-                    <EditText
-                        android:id="@+id/hbc_pli_rate"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:inputType="number"
-                        android:text="@string/hbc_pli_rate_default" />
-                </LinearLayout>
             </LinearLayout>
+        </LinearLayout>
+    </ScrollView>
 
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="@string/hbc_modem_label" />
-
-        <com.atakmap.android.gui.PluginSpinner
-            android:id="@+id/hbc_modem_type"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content" />
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="@string/hbc_stream_label" />
-
-        <com.atakmap.android.gui.PluginSpinner
-            android:id="@+id/hbc_tx_stream"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content" />
+    <!-- ============== OPTIONS TAB ============== -->
+    <ScrollView
+        android:id="@+id/hbc_tab_options"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone">
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal">
+            android:orientation="vertical"
+            android:padding="8dp">
 
-            <CheckBox
-                android:id="@+id/hbc_tx_enable"
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/hbc_callsign_label" />
+
+            <EditText
+                android:id="@+id/hbc_callsign"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="@string/hbc_callsign_hint"
+                android:inputType="textCapCharacters"
+                android:maxLength="8" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/hbc_send_to_label" />
+
+            <com.atakmap.android.gui.PluginSpinner
+                android:id="@+id/hbc_send_to"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/hbc_pli_rate_label" />
+
+            <EditText
+                android:id="@+id/hbc_pli_rate"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="number"
+                android:text="@string/hbc_pli_rate_default" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/hbc_txrx_label"
+                android:textStyle="bold" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <CheckBox
+                    android:id="@+id/hbc_tx_enable"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
@@ -252,26 +303,6 @@
                     android:checked="true"
                     android:text="@string/hbc_mode_casevac" />
             </LinearLayout>
-
-            <Button
-                android:id="@+id/hbc_start_stop"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="@string/hbc_start" />
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="@string/hbc_log_label"
-                android:textStyle="bold" />
-
-            <TextView
-                android:id="@+id/hbc_log"
-                android:layout_width="match_parent"
-                android:layout_height="160dp"
-                android:scrollbars="vertical"
-                android:textSize="11sp"
-                android:typeface="monospace" />
         </LinearLayout>
     </ScrollView>
 
@@ -284,6 +315,7 @@
         android:padding="8dp"
         android:visibility="gone">
 
+        <!-- Area 1: simple decodes -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -314,7 +346,8 @@
         <ScrollView
             android:id="@+id/hbc_decodes_scroll"
             android:layout_width="match_parent"
-            android:layout_height="match_parent">
+            android:layout_height="0dp"
+            android:layout_weight="1">
 
             <TextView
                 android:id="@+id/hbc_decodes"
@@ -323,5 +356,22 @@
                 android:textSize="12sp"
                 android:typeface="monospace" />
         </ScrollView>
+
+        <!-- Area 2: detailed live activity log -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/hbc_log_label"
+            android:textStyle="bold"
+            android:paddingTop="6dp" />
+
+        <TextView
+            android:id="@+id/hbc_log"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:scrollbars="vertical"
+            android:textSize="11sp"
+            android:typeface="monospace" />
     </LinearLayout>
 </LinearLayout>
