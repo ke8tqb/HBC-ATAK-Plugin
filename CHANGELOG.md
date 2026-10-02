@@ -4,6 +4,28 @@ All notable changes to HBC Audio Plugin are documented here.
 
 ---
 
+## [Unreleased]
+
+- prebuilt/: added the TAK Product Center production-signed 0.21
+  civ-release APK for ATAK 5.8.0 (third-party pipeline output from the
+  10-02 submission; signer CN "TAK Product Center ATAK Untrusted
+  Plugin Release"), replacing the 0.20 civ-release APK for that line.
+  The 5.7.0 line stays at the 0.20 release APK — 0.21 was submitted
+  for 5.8 only.
+
+---
+
+## [0.21] — Field-test fixes (10-02 campaign) + session debug log
+
+- prebuilt/: added the TAK Product Center production-signed 0.21
+  civ-release APK for ATAK 5.8.0 (third-party pipeline output from the
+  10-02 submission; signer CN "TAK Product Center ATAK Untrusted
+  Plugin Release"), replacing the 0.20 civ-release APK for that line.
+  The 5.7.0 line stays at the 0.20 release APK — 0.21 was submitted
+  for 5.8 only.
+
+---
+
 ## [0.21] — Field-test fixes (10-02 campaign) + session debug log
 
 Fixes for the three failures found in the 10-02-26 PLI test campaign:
