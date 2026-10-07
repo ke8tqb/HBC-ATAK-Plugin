@@ -39,6 +39,7 @@ public class MercuryModem {
     private static final double TX_AMPLITUDE = 0.5;
     private static final int LEAD_SILENCE_MS = 100;   // matches Mercury's head silence
     private static final int TAIL_SILENCE_MS = 100;   // matches Mercury's TAIL_TIME_US
+    private static final int INTER_BURST_GAP_MS = 100; // between batched bursts
     private static final byte DOMAIN_MARKER = 'H';    // rejects non-HBC DATAC traffic
 
     private final Context context;
@@ -51,6 +52,7 @@ public class MercuryModem {
 
     private volatile int voxLeaderMs = 0;
     private volatile int txStream = AudioManager.STREAM_ALARM;
+    private volatile int maxBatchFrames = 1; // DATAC4 bursts are ~5.6 s each
 
     private static final class TxItem {
         final byte[] payload;
@@ -93,6 +95,19 @@ public class MercuryModem {
 
     public boolean isTransmitting() {
         return transmitting;
+    }
+
+    /** True while the carrier sense hears signal energy on the channel. */
+    public boolean isChannelBusy() {
+        return csma.isBusy();
+    }
+
+    /**
+     * Max queued frames rendered into ONE continuous keying (one VOX
+     * key-up/hang cycle for the whole batch instead of one per frame).
+     */
+    public void setMaxBatchFrames(int n) {
+        maxBatchFrames = Math.max(1, n);
     }
 
     public synchronized void start() throws Exception {
@@ -182,7 +197,8 @@ public class MercuryModem {
         return b.build();
     }
 
-    private short[] renderTransmission(TxItem item) {
+    /** Encode one frame into a scaled burst (no lead/tail silence). */
+    private short[] renderBurst(TxItem item) {
         synchronized (MercuryNative.class) {
             int payloadBytes = MercuryNative.payloadBytesPerFrame();
             byte[] frame = new byte[payloadBytes];
@@ -194,14 +210,55 @@ public class MercuryModem {
             int n = MercuryNative.txBurst(frame, burst);
             if (n <= 0)
                 return null;
-
-            int lead = (LEAD_SILENCE_MS + voxLeaderMs) * SAMPLE_RATE / 1000;
-            int tail = TAIL_SILENCE_MS * SAMPLE_RATE / 1000;
-            short[] pcm = new short[lead + n + tail];
+            short[] out = new short[n];
             for (int i = 0; i < n; i++)
-                pcm[lead + i] = (short) (burst[i] * TX_AMPLITUDE);
-            return pcm;
+                out[i] = (short) (burst[i] * TX_AMPLITUDE);
+            return out;
         }
+    }
+
+    /**
+     * Render a whole batch as ONE keying: lead silence + VOX leader once,
+     * bursts back-to-back with short gaps so the decoder can re-arm, one
+     * tail. One VOX cycle per batch.
+     */
+    private short[] renderTransmission(List<TxItem> items) {
+        List<short[]> parts = new ArrayList<>();
+        int total = 0;
+        int lead = (LEAD_SILENCE_MS + voxLeaderMs) * SAMPLE_RATE / 1000;
+        parts.add(new short[lead]);
+        total += lead;
+
+        int gap = INTER_BURST_GAP_MS * SAMPLE_RATE / 1000;
+        boolean first = true;
+        for (TxItem item : items) {
+            short[] b = renderBurst(item);
+            if (b == null) {
+                listener.onStatus("TX error: Mercury burst render failed \u2014 frame skipped");
+                continue;
+            }
+            if (!first) {
+                parts.add(new short[gap]);
+                total += gap;
+            }
+            first = false;
+            parts.add(b);
+            total += b.length;
+        }
+        if (first)
+            return null;   // nothing rendered
+
+        int tail = TAIL_SILENCE_MS * SAMPLE_RATE / 1000;
+        parts.add(new short[tail]);
+        total += tail;
+
+        short[] pcm = new short[total];
+        int off = 0;
+        for (short[] c : parts) {
+            System.arraycopy(c, 0, pcm, off, c.length);
+            off += c.length;
+        }
+        return pcm;
     }
 
     private void txLoop() {
@@ -210,15 +267,16 @@ public class MercuryModem {
                     android.os.Process.THREAD_PRIORITY_URGENT_AUDIO);
         } catch (Exception ignored) {}
         while (running) {
-            TxItem item;
+            List<TxItem> batch = new ArrayList<>();
             synchronized (txLock) {
                 while (running && txQueue.isEmpty()) {
                     try { txLock.wait(500); } catch (InterruptedException e) { return; }
                 }
                 if (!running) return;
-                item = txQueue.pollFirst();
+                while (!txQueue.isEmpty() && batch.size() < maxBatchFrames)
+                    batch.add(txQueue.pollFirst());
             }
-            if (item == null) continue;
+            if (batch.isEmpty()) continue;
 
             // CSMA: energy carrier-sense with random backoff. HF bursts are
             // long, so allow a longer wait before giving up.
@@ -234,7 +292,7 @@ public class MercuryModem {
             transmitting = true;
             AudioTrack track = null;
             try {
-                short[] pcm = renderTransmission(item);
+                short[] pcm = renderTransmission(batch);
                 if (pcm == null) {
                     listener.onStatus("TX error: Mercury burst render failed");
                     continue;
@@ -260,8 +318,12 @@ public class MercuryModem {
                         && track.getPlaybackHeadPosition() < pcm.length - 32) {
                     Thread.sleep(20);
                 }
-                listener.onStatus("TX Mercury " + item.payload.length + " B ("
-                        + durMs + " ms burst)");
+                if (batch.size() == 1)
+                    listener.onStatus("TX Mercury " + batch.get(0).payload.length
+                            + " B (" + durMs + " ms burst)");
+                else
+                    listener.onStatus("TX batch: " + batch.size()
+                            + " frames (" + durMs + " ms burst)");
             } catch (Exception e) {
                 listener.onStatus("TX error: " + e.getMessage());
             } finally {

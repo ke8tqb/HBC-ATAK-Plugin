@@ -37,16 +37,34 @@
     <string name="hbc_txrx_label">Transmit / Receive</string>
     <string name="hbc_decodes_title">Packet Decodes</string>
     <string name="hbc_decodes_clear">Clear</string>
+    <string name="hbc_back">◀ Back</string>
     <string name="hbc_decodes_none">No packets decoded yet</string>
     <string name="hbc_modem_label">Modem (must match on all stations!)</string>
+    <!-- Display order: OFDM (default), Mercury, AX.25. Stored pref values
+         keep the historic meaning 0=AFSK 1=OFDM 2=Mercury; HbcPlugin maps
+         spinner position <-> stored type. -->
     <string-array name="hbc_modem_options">
-        <item>AX.25/APRS</item>
         <item>OFDM (Rattlegram)</item>
         <item>Mercury</item>
+        <item>AX.25/APRS</item>
     </string-array>
     <string name="hbc_stream_label">TX audio stream (try others if your device distorts tones)</string>
     <string name="hbc_afsk_level_label">AFSK TX level % (1–100; lower it if the receiver hears you but can\'t decode — AX.25 modem only)</string>
     <string name="hbc_afsk_level_default">50</string>
+    <string name="hbc_mac_label">Channel access (must match on all stations)</string>
+    <string name="hbc_mac_help_link">ⓘ UV-5R / FT-65 defaults</string>
+    <string name="hbc_mac_help_title">Recommended values — UV-5R / FT-65</string>
+    <string name="hbc_mac_help_text">These radios\' VOX hang time is FIXED — it cannot be shortened in any menu — and both hold the transmitter keyed about 1.0–1.5 s after audio stops.\n\n• Baofeng UV-5R: the VOX menu only sets sensitivity (1–10), not delay.\n• Yaesu FT-65: VOX is ON/OFF only (Set Mode item 35, with the SSM-512B earpiece mic).\n\nRecommended settings (use the SAME values on every station):\n\n• Channel access: Ring\n• Guard ms: 1500 — covers the worst VOX tail\n• Skip ms: 1200 — covers the slow VOX attack\n• Max turn ms: 0 (automatic per modem)\n• VOX Lead ms: 250 — sacrificial tone so the VOX attack does not clip the data preamble\n• TX Dwell ms: 500\n\nCalibrating Guard: run a session, read the saved session log, and measure how long the carrier outlives each burst. Set Guard = worst measured hang + 150 ms.\n\nHardwired PTT interface (Digirig etc., no VOX): Guard 300–500, VOX Lead 0.</string>
+    <string-array name="hbc_mac_options">
+        <item>CSMA (legacy, contention)</item>
+        <item>Ring (deterministic turns)</item>
+    </string-array>
+    <string name="hbc_ring_guard_label">Guard ms</string>
+    <string name="hbc_ring_guard_default">1500</string>
+    <string name="hbc_ring_skip_label">Skip ms</string>
+    <string name="hbc_ring_skip_default">1200</string>
+    <string name="hbc_ring_maxturn_label">Max turn ms (0=auto)</string>
+    <string name="hbc_ring_maxturn_default">0</string>
     <string-array name="hbc_stream_options">
         <item>Alarm (bypasses media effects)</item>
         <item>Media</item>

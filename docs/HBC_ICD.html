@@ -35,7 +35,7 @@
   <h1>HBC RADIO</h1>
   <div class="sub">ATAK Plugin &mdash; Interface Control Document</div>
   <div class="sub">Ham Binary CoT over Distance-Vector Mesh Radio</div>
-  <div class="contact">Version 1.3 &nbsp;|&nbsp; KE8TQB &nbsp;|&nbsp; github.com/ke8tqb/HBC-ATAK-Plugin</div>
+  <div class="contact">Version 1.4 &nbsp;|&nbsp; KE8TQB &nbsp;|&nbsp; github.com/ke8tqb/HBC-ATAK-Plugin</div>
 </div>
 
 <div class="toc">
@@ -48,7 +48,8 @@
       <li>3.1 &nbsp;AFSK1200 / AX.25</li>
       <li>3.2 &nbsp;OFDM COFDMTV (rattlegram)</li>
       <li>3.3 &nbsp;Mercury HF (FreeDV DATAC4)</li>
-      <li>3.4 &nbsp;Channel Access (CSMA) &mdash; taking turns on the air</li>
+      <li>3.4 &nbsp;Channel Access &mdash; CSMA (legacy contention)</li>
+      <li>3.5 &nbsp;Channel Access &mdash; Ring MAC (deterministic rotation)</li>
     </ol>
   </li>
   <li>Mesh Network Layer
@@ -168,9 +169,10 @@ that says &ldquo;this is HBC traffic&rdquo;), bytes 2..n = the mesh frame, zero-
 Mercury&rsquo;s higher-level ARQ data-link protocol. A desktop Mercury installation can
 demodulate these bursts but will not pass them to its TCP data port.</div>
 
-<h3>3.4 Channel Access (CSMA) &mdash; taking turns on the air</h3>
+<h3>3.4 Channel Access &mdash; CSMA (legacy contention)</h3>
 <p>Only one station can talk on a radio channel at a time; two at once garble both
-(a &ldquo;collision&rdquo;). Before transmitting, every modem <i>listens first</i>: incoming
+(a &ldquo;collision&rdquo;). In CSMA mode (the default and the only mode before plugin 0.22),
+every modem <i>listens first</i>: incoming
 audio energy is compared against an automatically learned background-noise level, and the
 channel counts as busy when audio is 4&times; louder than that background (held for 400 ms
 past the last loud moment so brief gaps inside someone&rsquo;s transmission don&rsquo;t look
@@ -179,6 +181,69 @@ like free air). When the channel goes quiet, the station still waits a random 15
 8 seconds of continuous busy (15 s on Mercury) the frame is sent anyway so traffic can never
 be blocked forever. AFSK also uses its demodulator&rsquo;s data-carrier-detect as a second
 &ldquo;someone is talking&rdquo; signal.</p>
+<div class="note"><b>When to use which:</b> CSMA is fine for 2&ndash;5 stations. It cannot
+see <i>hidden terminals</i> (two stations that cannot hear each other but both reach a
+third), and with VOX radios every frame pays the radio&rsquo;s full key-up/hang cycle &mdash;
+so with many stations, collisions and dead air grow. For nets up to ~20 stations, select
+the <b>Ring MAC</b> (section 3.5) on every station instead.</div>
+
+<h3>3.5 Channel Access &mdash; Ring MAC (deterministic rotation)</h3>
+<p>New in plugin 0.22. Instead of competing for the channel, stations take <b>turns in a
+fixed, known order</b>: every station sorts the callsigns it knows about (its own plus the
+mesh address book of section 4.7, which fills itself just by listening) and rotates through
+that list. The list IS the schedule &mdash; there is no coordinator station, no
+&ldquo;token&rdquo; packet, and <b>no change to anything transmitted on the air</b>: the MAC
+only decides <i>when</i> a station may key up, never what the bytes look like. 0.21 and
+0.22 stations therefore interoperate; a CSMA station in a Ring net is simply heard as
+carrier and deferred to.</p>
+<p>A station transmits only during its own turn &mdash; and then sends <b>everything it has
+queued as one continuous keying</b> (one batch: single lead-in, frames back-to-back, single
+tail), so the radio&rsquo;s VOX hang is paid once per turn instead of once per frame. Every
+station advances the turn pointer on its own, using whichever of these happens first:</p>
+<table>
+  <tr><th>Rule</th><th>Trigger</th><th>Purpose</th></tr>
+  <tr><td>1. Early release</td><td>The owner&rsquo;s carrier was heard and the channel has then stayed clear for <b>Guard</b> ms</td><td>Short messages finish early; Guard absorbs the radio&rsquo;s VOX hang so the tail is never mistaken for free air</td></tr>
+  <tr><td>2. Silent skip</td><td>No carrier within <b>Skip</b> ms of the turn starting</td><td>Idle stations cost ~1 s, not a whole turn</td></tr>
+  <tr><td>3. Deadline</td><td><b>Max turn + Guard</b> ms since the turn started</td><td>Keeps the ring alive past hidden terminals and dead stations &mdash; even a station that hears nothing advances</td></tr>
+</table>
+<p>Two additional behaviors keep every station&rsquo;s pointer agreeing: decoding any mesh
+frame <b>re-aligns the pointer to that frame&rsquo;s Transmitter callsign</b> (hard evidence
+beats timers), and a station never keys up while the channel is busy (interlock), even on
+its own turn. A joining station listens for one full cycle (at most 30 s) before taking its
+first turn; roster changes apply only when the rotation wraps. A station that stays silent
+for 3 consecutive turns is noted as dormant (it keeps costing only the Skip time until the
+mesh route TTL removes it). 911 alerts are the one exception to turn order: they may
+transmit in the next idle gap between turns after a short random delay.</p>
+<table>
+  <tr><th>Setting (Audio Setup tab)</th><th>Default</th><th>What it covers</th></tr>
+  <tr><td>Guard ms</td><td>1500</td><td>The radio&rsquo;s VOX hang after audio stops, plus margin</td></tr>
+  <tr><td>Skip ms</td><td>1200</td><td>VOX attack (~250 ms) + time to detect the carrier before declaring a station silent</td></tr>
+  <tr><td>Max turn ms</td><td>0 = automatic per modem (AFSK 6000, OFDM ~4400, Mercury ~6000)</td><td>The longest allowed batch; also the deadline timer</td></tr>
+</table>
+<div class="note"><b>Radio profile &mdash; Baofeng UV-5R and Yaesu FT-65 (reference
+radios):</b> neither radio&rsquo;s VOX hang is adjustable &mdash; the FT-65&rsquo;s VOX menu
+is ON/OFF only (Set Mode item 35, used with the SSM-512B earpiece mic) and the UV-5R
+exposes only VOX <i>sensitivity</i> 1&ndash;10 &mdash; and both hold the transmitter keyed
+roughly 1.0&ndash;1.5 s after audio stops. The 1500 ms Guard default covers that worst
+case. Their VOX attack also clips the first ~150&ndash;250 ms of audio, so set
+<b>VOX Lead = 250 ms</b> when driving these radios. Both radios&rsquo; time-out timers
+(&ge;60 s) are far above the longest turn &mdash; no interaction.</div>
+<div class="plain"><b>Calibrating Guard:</b> run a two-station session, key one radio with
+a short test transmission, and read the session log&rsquo;s receive timing (the gap between
+the end of decoded audio and the next burst, or the AFSK RX burst lines) to measure how
+long the carrier outlives the audio. Set Guard = the worst measured hang among all radios
+in the net + 150 ms. Every station must use the same Guard, Skip and modem.</div>
+<p><b>Capacity</b> (20 stations, 5 of them with traffic in a given cycle, defaults):
+AFSK &asymp; 32 s per full rotation, OFDM &asymp; 35 s, Mercury &asymp; 54 s. So that
+position reports always fit one rotation, Ring mode automatically floors the PLI interval
+at <code>roster &times; 6 s</code> (<code>&times; 10 s</code> on Mercury), even if the
+user&rsquo;s &ldquo;PLI min s&rdquo; is set lower.</p>
+<div class="note"><b>Design notes (why not the alternatives):</b> REQUEST/GRANT schemes,
+RTS/CTS and explicit token packets all cost full modem bursts per exchange &mdash; on OFDM
+every burst is ~1.84 s and on Mercury ~5.6 s regardless of payload size, so control
+traffic is as expensive as data. A coordinator is also a single point of failure. Slotted
+TDMA wastes the slot remainder on short messages. The ring keeps the determinism of
+TDMA/token designs with none of their airtime overhead.</div>
 
 <div class="pagebreak"></div>
 <h2>4. Mesh Network Layer</h2>
@@ -360,13 +425,20 @@ Tools menu (Figure 1). This section shows each screen (6.1), explains every cont
 and toolbar icon (6.3), and teaches how to read the two logs (6.4, 6.5). Red arrows in the
 figures point at the controls each caption describes.</p>
 <h3>6.1 Screen-by-Screen Figures</h3>
+<div class="note"><b>NOTE (0.22):</b> the figures below show the 0.20-era pane. Since
+0.22 the pane is reorganized into three tabs &mdash; <b>Audio Setup</b> (modem, TX
+stream, AFSK level, channel access, timing), <b>Options</b> (callsign, Send-to, PLI
+rate, enables, message types) and <b>Decodes</b> (a full-panel page with its own
+&#9664; Back button) &mdash; under a slim always-visible header carrying the colored
+status line and the Start/Stop button. The controls themselves are unchanged and are
+all described in section 6.2; refreshed screenshots will accompany the next figure
+update.</div>
 
 <div class="figure">
   <img src="images/fig1_tools_menu.jpg" alt="ATAK Tools menu with the HBC Radio entry">
   <div class="cap">Figure 1 &mdash; Opening the plugin: ATAK menu (&#9776;) &rarr; Tools
   &rarr; <b>HBC Radio</b> (arrow). The same grid is where ATAK lists every installed
-  plugin; the radio-status icon of section 6.3 can also be dragged into the top toolbar
-  row for one-tap access.</div>
+  plugin.</div>
 </div>
 
 <div class="figure">
@@ -414,22 +486,25 @@ figures point at the controls each caption describes.</p>
 </div>
 
 <h3>6.2 Every Control and What It Does</h3>
-<p>Top to bottom through the Settings tab (Figures 2, 3, and 5):</p>
+<p>Grouped by where each control lives in the 0.22 pane:</p>
 <table>
   <tr><th>Control</th><th>Type</th><th>What it does</th></tr>
-  <tr><td>Settings / Decodes</td><td>Tab buttons</td><td>Switch between the configuration screen and the received-packet log. The active tab&rsquo;s button is grayed out.</td></tr>
-  <tr><td>Status line</td><td>Text</td><td><code>RUNNING as {callsign}</code> while the modem is on; <code>STOPPED</code> otherwise. Mirrors the toolbar radio icon color.</td></tr>
-  <tr><td>Next PLI</td><td>Live text (1 s updates)</td><td>Countdown until the next position report may transmit: <code>in m:ss</code>, <code>ready (waiting for ATAK position update)</code>, <code>disabled</code> (TX or PLI unchecked), or <code>&mdash; (radio off)</code>.</td></tr>
+  <tr><td>Audio Setup / Options / Decodes</td><td>Tab buttons</td><td>Switch screens; the active tab&rsquo;s button is grayed out. <b>Decodes</b> opens as a full-panel page (header and tab bar hidden) with its own &#9664; Back button returning to the last settings tab.</td></tr>
+  <tr><td>Status line</td><td>Text (header, always visible)</td><td><code>HBC Radio &mdash; RUNNING as {callsign}</code> in <b>green</b> while the modem is on; <code>HBC Radio &mdash; STOPPED</code> in <b>red</b> otherwise.</td></tr>
+  <tr><td>Next PLI / Build line</td><td>Live text (1 s updates)</td><td>While running: countdown until the next position report may transmit (<code>in m:ss</code>, <code>ready (waiting for ATAK position update)</code>, or <code>disabled</code>). While stopped: <code>Build {timestamp} &middot; v{version}</code> &mdash; use it to verify which binary is actually installed.</td></tr>
   <tr><td>Ham Callsign</td><td>Text field</td><td>Your FCC callsign, max 8 characters (A&ndash;Z, 0&ndash;9, hyphen). Used as this station&rsquo;s mesh address and legal station ID. Required before starting.</td></tr>
   <tr><td>Send to</td><td>Dropdown</td><td>Destination for markers/points you create: <code>Broadcast (everyone)</code>, or any heard station for a routed, acknowledged Direct (section 4.5). Chat DMs ignore this and always route to their recipient automatically.</td></tr>
   <tr><td>TX Dwell ms</td><td>Number field</td><td>AFSK only: length of the HDLC flag preamble sent before data so the receiving modem can sync. Default 500. Increase if receivers miss the start of packets.</td></tr>
   <tr><td>VOX Lead ms</td><td>Number field</td><td>Warm-up audio played before data so a VOX-keyed radio has time to key up. Default 0 (use 0 with a hardwired PTT interface). Increase if the first part of transmissions is cut off.</td></tr>
   <tr><td>PLI min s</td><td>Number field</td><td>Minimum seconds between your own position reports (rate limit). Default 60. Drives the &ldquo;Next PLI&rdquo; countdown.</td></tr>
-  <tr><td>Modem</td><td>Dropdown</td><td>Which of the three waveforms to use (section 3, Figure 4). Must match on every station.</td></tr>
+  <tr><td>Modem</td><td>Dropdown</td><td>Which of the three waveforms to use (section 3). Listed OFDM (Rattlegram), Mercury, AX.25/APRS; <b>OFDM is the default</b>. Must match on every station.</td></tr>
   <tr><td>TX audio stream</td><td>Dropdown</td><td>Which Android audio channel carries the transmit tones (Figure 3). Default Alarm; try the others only if your device distorts the tones.</td></tr>
+  <tr><td>Channel access</td><td>Dropdown</td><td>CSMA (legacy contention, section 3.4) or Ring (deterministic turns, section 3.5). Must match on every station.</td></tr>
+  <tr><td>&#9432; UV-5R / FT-65 defaults</td><td>Help link</td><td>Opens a dialog with the recommended Ring/VOX values for the reference radios, why their VOX hang cannot be shortened, the Guard calibration procedure, and hardwired-PTT alternatives (section 3.5).</td></tr>
+  <tr><td>Guard ms / Skip ms / Max turn ms</td><td>Number fields</td><td>Ring MAC timing (section 3.5): Guard covers the radios&rsquo; VOX hang (default 1500), Skip covers VOX attack before skipping a silent station (default 1200), Max turn caps one batch (0 = automatic per modem). Same values on every station.</td></tr>
   <tr><td>Transmit / Receive</td><td>Checkboxes</td><td>Master switches. Unchecking Transmit makes the station receive-only; unchecking Receive ignores all incoming audio.</td></tr>
   <tr><td>PLI, Spots, Alerts, Chat, Shapes, CASEVAC</td><td>Checkboxes</td><td>Per-type transmit filters, matching the HBC modes of section 5.2. An unchecked type is never transmitted (receiving is unaffected).</td></tr>
-  <tr><td>Start / Stop Radio Link</td><td>Button</td><td>Validates and saves the settings, then starts (or stops) the selected modem and the mesh layer. The label flips to match the current state.</td></tr>
+  <tr><td>Start / Stop Radio Link</td><td>Button (header, always visible)</td><td>Validates and saves the settings, then starts (or stops) the selected modem and the mesh layer. The label flips to match the current state.</td></tr>
   <tr><td>Activity Log</td><td>Scrolling text</td><td>Timestamped diagnostic feed of everything the plugin does (section 6.4). Newest entries on top.</td></tr>
   <tr><td>Clear (Decodes tab)</td><td>Button</td><td>Empties the Decodes log and resets its packet counter.</td></tr>
 </table>
@@ -437,9 +512,12 @@ figures point at the controls each caption describes.</p>
 <h3>6.3 Toolbar Icons</h3>
 <table>
   <tr><th>Icon</th><th>Tap</th><th>Notes</th></tr>
-  <tr><td>HBC plugin icon (antenna &ldquo;X&rdquo;)</td><td>Opens the settings pane</td><td>The plugin&rsquo;s main entry point in ATAK&rsquo;s Tools menu (Figure 1).</td></tr>
-  <tr><td>Radio status icon</td><td>Starts/stops the modem (with a confirmation toast)</td><td>Gray = modem stopped; electric green with a light-green glow = modem running. Long-press shows the state tooltip (&ldquo;HBC Radio: RUNNING (tap to stop)&rdquo; / &ldquo;STOPPED (tap to start)&rdquo;). If no callsign is saved yet, tapping opens settings instead. Can be dragged into ATAK&rsquo;s top toolbar row like any tool.</td></tr>
+  <tr><td>HBC Radio (radio-tower glyph)</td><td>Opens the plugin pane</td><td>The plugin&rsquo;s single entry point in ATAK&rsquo;s Tools menu (Figure 1). The Tools grid tints icons white, so the entry uses a transparent-background tower silhouette; the colored badge appears as the app icon in TAK Package Mgmt and the plugin manager.</td></tr>
 </table>
+<div class="note"><b>Changed in 0.22:</b> the separate gray/green radio-status toolbar
+icon (tap-to-toggle) was removed &mdash; the radio link is controlled entirely from the
+pane&rsquo;s Start/Stop button, and the link state is shown by the colored header status
+line (red STOPPED / green RUNNING).</div>
 
 <h3>6.4 Reading the Activity Log</h3>
 <p>Every line starts with a <code>HH:mm:ss</code> timestamp; the newest line is at the top.
@@ -457,6 +535,17 @@ runtime) and what each one means.</p>
   <tr><td class="mono">CSMA: channel busy &mdash; deferring TX</td><td>Someone else is on the air; the plugin is politely waiting (section 3.4).</td></tr>
   <tr><td class="mono">CSMA: channel busy &gt; 8 s &mdash; transmitting anyway</td><td>The channel never cleared, so the frame was sent to avoid starving traffic.</td></tr>
   <tr><td class="mono">OFDM sync: {call} ... / Mercury sync acquired</td><td>The demodulator locked onto an incoming signal (decode result follows).</td></tr>
+  <tr><td class="mono">TX batch: {n} frames ({t} ms burst)</td><td>Several queued frames went out as one continuous keying (one VOX cycle for the whole batch).</td></tr>
+</table>
+<p><b>Channel access (Ring MAC, section 3.5):</b></p>
+<table>
+  <tr><th>Message</th><th>Meaning</th></tr>
+  <tr><td class="mono">Ring: started ({n} stations, guard {g} ms, skip {s} ms)</td><td>Ring mode is on with these parameters and this roster size.</td></tr>
+  <tr><td class="mono">Ring: joined rotation as {call} ({n} stations)</td><td>The listening (settle) period is over; this station now takes its turns.</td></tr>
+  <tr><td class="mono">Ring: TX turn ({i}/{n}, {x} frames)</td><td>It is this station&rsquo;s turn and {x} queued frames were released as one batch.</td></tr>
+  <tr><td class="mono">Ring: roster now {n} stations ({list})</td><td>The rotation list changed at a cycle wrap (station joined or expired).</td></tr>
+  <tr><td class="mono">Ring: {call} dormant (3 silent turns)</td><td>That station has not transmitted for 3 cycles; it keeps costing only the Skip time.</td></tr>
+  <tr><td class="mono">Ring: emergency frame queued &mdash; preempting at next idle window / Ring: emergency TX ({x} frames, preempt)</td><td>A 911 alert jumped the turn order in an idle gap (the single allowed exception).</td></tr>
 </table>
 <p><b>Transmit decisions:</b></p>
 <table>
@@ -524,7 +613,12 @@ answers &ldquo;what have I actually received?&rdquo;</div>
   <tr><td>Quiet-time announce keepalive</td><td>10 min without own traffic</td><td>Mesh</td></tr>
   <tr><td>CSMA busy threshold / hold</td><td>4&times; adaptive noise floor / 400 ms</td><td>PHY</td></tr>
   <tr><td>CSMA backoff / give-up</td><td>150&ndash;550 ms clear / 8 s (15 s Mercury)</td><td>PHY</td></tr>
-  <tr><td>PLI rate limit</td><td>User setting, default 60 s (Figure 2)</td><td>Application</td></tr>
+  <tr><td>Ring Guard (VOX hang cover)</td><td>User setting, default 1500 ms (UV-5R / FT-65 profile)</td><td>MAC</td></tr>
+  <tr><td>Ring Skip (silent-station timeout)</td><td>User setting, default 1200 ms</td><td>MAC</td></tr>
+  <tr><td>Ring Max turn</td><td>Auto per modem: AFSK 6000 / OFDM 4400 / Mercury 6000 ms (user-overridable)</td><td>MAC</td></tr>
+  <tr><td>Ring settle (join listening)</td><td>1 observed cycle, max 30 s</td><td>MAC</td></tr>
+  <tr><td>Ring batch caps</td><td>AFSK 4 / OFDM 2 / Mercury 1 frames per keying (also applies under CSMA)</td><td>MAC/PHY</td></tr>
+  <tr><td>PLI rate limit</td><td>User setting, default 60 s (Figure 2); Ring mode floors it at roster &times; 6 s (&times; 10 s Mercury)</td><td>Application</td></tr>
   <tr><td>RX duplicate window (frame hash)</td><td>30 s</td><td>Plugin</td></tr>
 </table>
 
@@ -532,6 +626,12 @@ answers &ldquo;what have I actually received?&rdquo;</div>
 <ul>
   <li>All stations on a channel must run the same plugin wire version (0.12+ mesh framing)
       and select the same modem (Figure 4).</li>
+  <li>The channel-access mode (section 3.4/3.5) is <b>behavioral only</b> &mdash; nothing on
+      the air changes &mdash; so 0.21-and-earlier stations interoperate with 0.22 stations.
+      For orderly rotation every station should still select the same mode and the same
+      Guard/Skip values; a CSMA station mixed into a Ring net simply contends as before and
+      the Ring stations defer to its carrier (the net degrades toward polite CSMA, never
+      below it).</li>
   <li>Mercury DATAC4&rsquo;s small frame limits routed Directs to ~29 bytes of HBC payload
       (Broadcasts ~39 B). Every standard message fits; unusually large Mode 6 markers may
       need Broadcast or a different modem.</li>
@@ -552,8 +652,11 @@ answers &ldquo;what have I actually received?&rdquo;</div>
   <tr><td>Hop</td><td>One radio link in a relay chain (A&rarr;B is one hop; A&rarr;B&rarr;C is two)</td></tr>
   <tr><td>Route / next hop</td><td>Address-book entry: which neighbor to hand a message to so it reaches a destination</td></tr>
   <tr><td>ACK</td><td>Acknowledgment — a short &ldquo;received OK&rdquo; reply</td></tr>
-  <tr><td>CSMA</td><td>Carrier Sense Multiple Access — listen before transmitting to avoid collisions</td></tr>
-  <tr><td>VOX</td><td>Voice-operated transmit — the radio keys up automatically when it hears audio</td></tr>
+  <tr><td>CSMA</td><td>Carrier Sense Multiple Access &mdash; listen before transmitting to avoid collisions</td></tr>
+  <tr><td>MAC</td><td>Medium Access Control &mdash; the rules deciding when a station may transmit (CSMA or Ring here)</td></tr>
+  <tr><td>Ring MAC / turn</td><td>The 0.22 channel-access mode: stations rotate through the sorted roster; a turn is one station&rsquo;s transmit window</td></tr>
+  <tr><td>Guard time</td><td>Silence a Ring station waits after the channel clears, covering the previous radio&rsquo;s VOX hang</td></tr>
+  <tr><td>VOX</td><td>Voice-operated transmit &mdash; the radio keys up automatically when it hears audio</td></tr>
   <tr><td>CRC</td><td>Cyclic Redundancy Check — a checksum that detects corrupted data</td></tr>
   <tr><td>ITA2</td><td>A 5-bit teletype alphabet from the telegraph era; smaller than normal 8-bit text</td></tr>
   <tr><td>TTL</td><td>Time To Live — how long a record is kept before being erased</td></tr>

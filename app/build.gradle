@@ -8,7 +8,7 @@
 
 buildscript {
 
-ext.PLUGIN_VERSION = "0.21"
+ext.PLUGIN_VERSION = "0.22"
 
     def takdevVersion = '3.+'
 
@@ -215,6 +215,10 @@ android {
          applicationVariants.all { variant ->
              variant.resValue "string", "versionName", variant.versionName
              buildConfigField 'String', 'ATAK_PACKAGE_NAME', '"com.atakmap.app.civ"'
+             // Exact build timestamp, shown in the pane + session log so a
+             // stale install can be spotted immediately in the field.
+             buildConfigField 'String', 'BUILD_STAMP',
+                     '"' + new Date().format("yyyy-MM-dd HH:mm") + '"'
         }
     }
 

@@ -61,6 +61,11 @@ public class AudioModem {
     // 300 ms (~45 flags) is the classic TNC TXDelay default.
     private static final int MIN_PREAMBLE_MS = 300;
 
+    // Continuation-frame preamble inside a batched burst: the demodulator is
+    // already bit-synced after the first frame of the burst, so a short flag
+    // run (~3 flags) is enough to separate frames.
+    private static final int CONT_PREAMBLE_MS = 20;
+
     private final FrameListener listener;
     private final Context context;
 
@@ -75,6 +80,7 @@ public class AudioModem {
     private volatile int voxLeaderMs = 0;   // steady mark tone before preamble
     private volatile int txStream = AudioManager.STREAM_ALARM;
     private volatile double txLevel = TX_AMPLITUDE; // user-set TX drive (0.01..1.0)
+    private volatile int maxBatchFrames = 4; // frames per continuous burst
 
     private final Deque<Packet> txQueue = new ArrayDeque<>();
     private final Object txLock = new Object();
@@ -136,6 +142,14 @@ public class AudioModem {
         txLevel = Math.max(1, Math.min(100, pct)) / 100.0;
     }
 
+    /**
+     * Max queued frames rendered into ONE continuous burst (one VOX
+     * key-up/hang cycle for the whole batch instead of one per frame).
+     */
+    public void setMaxBatchFrames(int n) {
+        maxBatchFrames = Math.max(1, n);
+    }
+
     public void setVoxLeaderMs(int ms) {
         voxLeaderMs = Math.max(0, ms);
     }
@@ -175,7 +189,7 @@ public class AudioModem {
 
     public boolean isChannelBusy() {
         PacketDemodulator d = demodulator;
-        return d != null && d.dcd();
+        return csma.isBusy() || (d != null && d.dcd());
     }
 
     public synchronized void start() throws Exception {
@@ -234,7 +248,7 @@ public class AudioModem {
     // ------------------------------------------------------------------
     // TX
     // ------------------------------------------------------------------
-    private short[] renderTransmission(Packet packet, int outRate) {
+    private short[] renderTransmission(List<Packet> packets, int outRate) {
         List<float[]> chunks = new ArrayList<>();
         int total = 0;
 
@@ -243,7 +257,7 @@ public class AudioModem {
         chunks.add(new float[lead]);
         total += lead;
 
-        // optional VOX leader: steady mark tone
+        // optional VOX leader: steady mark tone (once per burst)
         int leaderSamples = voxLeaderMs * outRate / 1000;
         if (leaderSamples > 0) {
             float[] leader = new float[leaderSamples];
@@ -256,8 +270,11 @@ public class AudioModem {
             total += leaderSamples;
         }
 
-        // preamble + frame, rendered at the native output rate so the OS
-        // resampler never touches the waveform (APRSdroid technique)
+        // frames back-to-back in ONE keying: the first frame carries the
+        // full sync preamble; continuation frames only a short flag run
+        // (the demodulator is already bit-synced within the burst). The
+        // whole batch is rendered at the native output rate so the OS
+        // resampler never touches the waveform (APRSdroid technique).
         int effDwellMs = Math.max(MIN_PREAMBLE_MS, txDwellMs);
         if (effDwellMs != txDwellMs && !warnedDwellClamp) {
             warnedDwellClamp = true;
@@ -265,16 +282,21 @@ public class AudioModem {
                     + " ms too short for RX sync \u2014 using "
                     + MIN_PREAMBLE_MS + " ms preamble");
         }
-        Afsk1200Modulator txMod = new Afsk1200Modulator(outRate);
-        txMod.setTxDelay(Math.max(1, effDwellMs / 10)); // 10 ms units
-        txMod.prepareToTransmit(packet);
-        float[] buf = txMod.getTxSamplesBuffer();
-        int n;
-        while ((n = txMod.getSamples()) > 0) {
-            float[] c = new float[n];
-            System.arraycopy(buf, 0, c, 0, n);
-            chunks.add(c);
-            total += n;
+        boolean first = true;
+        for (Packet packet : packets) {
+            Afsk1200Modulator txMod = new Afsk1200Modulator(outRate);
+            txMod.setTxDelay(Math.max(1,
+                    (first ? effDwellMs : CONT_PREAMBLE_MS) / 10)); // 10 ms units
+            first = false;
+            txMod.prepareToTransmit(packet);
+            float[] buf = txMod.getTxSamplesBuffer();
+            int n;
+            while ((n = txMod.getSamples()) > 0) {
+                float[] c = new float[n];
+                System.arraycopy(buf, 0, c, 0, n);
+                chunks.add(c);
+                total += n;
+            }
         }
 
         // trailing silence: playback truncation/VOX drop can't clip the CRC
@@ -298,15 +320,16 @@ public class AudioModem {
                     android.os.Process.THREAD_PRIORITY_URGENT_AUDIO);
         } catch (Exception ignored) {}
         while (running) {
-            Packet packet;
+            List<Packet> batch = new ArrayList<>();
             synchronized (txLock) {
                 while (running && txQueue.isEmpty()) {
                     try { txLock.wait(500); } catch (InterruptedException e) { return; }
                 }
                 if (!running) return;
-                packet = txQueue.pollFirst();
+                while (!txQueue.isEmpty() && batch.size() < maxBatchFrames)
+                    batch.add(txQueue.pollFirst());
             }
-            if (packet == null) continue;
+            if (batch.isEmpty()) continue;
 
             // CSMA: energy carrier-sense + demodulator DCD, random backoff
             try {
@@ -329,7 +352,7 @@ public class AudioModem {
                     outRate = SAMPLE_RATE;
                 }
                 if (outRate <= 0) outRate = SAMPLE_RATE;
-                short[] pcm = renderTransmission(packet, outRate);
+                short[] pcm = renderTransmission(batch, outRate);
 
                 AudioAttributes attrs = txAttributes();
                 AudioFormat fmt = new AudioFormat.Builder()
@@ -355,8 +378,12 @@ public class AudioModem {
                         && track.getPlaybackHeadPosition() < pcm.length - 32) {
                     Thread.sleep(20);
                 }
-                listener.onStatus("TX " + packet.toString()
-                        + " (" + durMs + " ms burst)");
+                if (batch.size() == 1)
+                    listener.onStatus("TX " + batch.get(0).toString()
+                            + " (" + durMs + " ms burst)");
+                else
+                    listener.onStatus("TX batch: " + batch.size()
+                            + " frames (" + durMs + " ms burst)");
             } catch (Exception e) {
                 listener.onStatus("TX error: " + e.getMessage());
             } finally {

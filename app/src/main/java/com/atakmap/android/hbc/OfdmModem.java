@@ -40,6 +40,7 @@ public class OfdmModem {
     private static final double TX_AMPLITUDE = 0.5;
     private static final int LEAD_SILENCE_MS = 150;
     private static final int TAIL_SILENCE_MS = 250;
+    private static final int INTER_BURST_GAP_MS = 100; // between batched bursts
     private static final int CARRIER_HZ = 1500;
 
     // extended_length = ((1280 * RATE) / 8000) * 9 / 8
@@ -55,6 +56,7 @@ public class OfdmModem {
 
     private volatile int voxLeaderMs = 0;
     private volatile int txStream = AudioManager.STREAM_ALARM;
+    private volatile int maxBatchFrames = 2; // bursts per continuous keying
 
     private static final class TxItem {
         final String callsign;
@@ -93,6 +95,19 @@ public class OfdmModem {
 
     public boolean isTransmitting() {
         return transmitting;
+    }
+
+    /** True while the carrier sense hears signal energy on the channel. */
+    public boolean isChannelBusy() {
+        return csma.isBusy();
+    }
+
+    /**
+     * Max queued frames rendered into ONE continuous keying (one VOX
+     * key-up/hang cycle for the whole batch instead of one per frame).
+     */
+    public void setMaxBatchFrames(int n) {
+        maxBatchFrames = Math.max(1, n);
     }
 
     public synchronized void start() throws Exception {
@@ -172,7 +187,8 @@ public class OfdmModem {
         return b.build();
     }
 
-    private short[] renderTransmission(TxItem item) {
+    /** Encode one frame into a scaled burst (no lead/tail silence). */
+    private short[] renderBurst(TxItem item, int noiseSymbols) {
         byte[] payload = new byte[OfdmNative.PAYLOAD_BYTES];
         payload[0] = (byte) item.payload.length;
         System.arraycopy(item.payload, 0, payload, 1, item.payload.length);
@@ -185,20 +201,11 @@ public class OfdmModem {
                     ? c : ' ');
         }
 
-        // VOX leader implemented via rattlegram noise symbols (~180 ms each)
-        int symbolMs = 1000 * SYMBOL_SAMPLES / SAMPLE_RATE;
-        int noiseSymbols = voxLeaderMs > 0
-                ? Math.max(1, (voxLeaderMs + symbolMs - 1) / symbolMs) : 0;
-
         synchronized (OfdmNative.class) {
             OfdmNative.configureEncoder(payload, call, CARRIER_HZ, noiseSymbols, false);
 
             List<short[]> chunks = new ArrayList<>();
             int total = 0;
-            int lead = LEAD_SILENCE_MS * SAMPLE_RATE / 1000;
-            chunks.add(new short[lead]);
-            total += lead;
-
             short[] block = new short[SYMBOL_SAMPLES];
             boolean more = true;
             int guard = 0;
@@ -211,18 +218,57 @@ public class OfdmModem {
                 total += SYMBOL_SAMPLES;
             }
 
-            int tail = TAIL_SILENCE_MS * SAMPLE_RATE / 1000;
-            chunks.add(new short[tail]);
-            total += tail;
-
-            short[] pcm = new short[total];
+            short[] out = new short[total];
             int off = 0;
             for (short[] c : chunks) {
-                System.arraycopy(c, 0, pcm, off, c.length);
+                System.arraycopy(c, 0, out, off, c.length);
                 off += c.length;
             }
-            return pcm;
+            return out;
         }
+    }
+
+    /**
+     * Render a whole batch as ONE keying: lead silence + optional noise
+     * leader on the first burst, bursts back-to-back with short gaps so the
+     * decoder can re-arm between them, one tail. One VOX cycle per batch.
+     */
+    private short[] renderTransmission(List<TxItem> items) {
+        // VOX leader implemented via rattlegram noise symbols (~180 ms each)
+        int symbolMs = 1000 * SYMBOL_SAMPLES / SAMPLE_RATE;
+        int noiseSymbols = voxLeaderMs > 0
+                ? Math.max(1, (voxLeaderMs + symbolMs - 1) / symbolMs) : 0;
+
+        List<short[]> parts = new ArrayList<>();
+        int total = 0;
+        int lead = LEAD_SILENCE_MS * SAMPLE_RATE / 1000;
+        parts.add(new short[lead]);
+        total += lead;
+
+        int gap = INTER_BURST_GAP_MS * SAMPLE_RATE / 1000;
+        boolean first = true;
+        for (TxItem item : items) {
+            if (!first) {
+                parts.add(new short[gap]);
+                total += gap;
+            }
+            short[] b = renderBurst(item, first ? noiseSymbols : 0);
+            first = false;
+            parts.add(b);
+            total += b.length;
+        }
+
+        int tail = TAIL_SILENCE_MS * SAMPLE_RATE / 1000;
+        parts.add(new short[tail]);
+        total += tail;
+
+        short[] pcm = new short[total];
+        int off = 0;
+        for (short[] c : parts) {
+            System.arraycopy(c, 0, pcm, off, c.length);
+            off += c.length;
+        }
+        return pcm;
     }
 
     private void txLoop() {
@@ -231,15 +277,16 @@ public class OfdmModem {
                     android.os.Process.THREAD_PRIORITY_URGENT_AUDIO);
         } catch (Exception ignored) {}
         while (running) {
-            TxItem item;
+            List<TxItem> batch = new ArrayList<>();
             synchronized (txLock) {
                 while (running && txQueue.isEmpty()) {
                     try { txLock.wait(500); } catch (InterruptedException e) { return; }
                 }
                 if (!running) return;
-                item = txQueue.pollFirst();
+                while (!txQueue.isEmpty() && batch.size() < maxBatchFrames)
+                    batch.add(txQueue.pollFirst());
             }
-            if (item == null) continue;
+            if (batch.isEmpty()) continue;
 
             // CSMA: energy carrier-sense with random backoff
             try {
@@ -254,7 +301,7 @@ public class OfdmModem {
             transmitting = true;
             AudioTrack track = null;
             try {
-                short[] pcm = renderTransmission(item);
+                short[] pcm = renderTransmission(batch);
 
                 AudioFormat fmt = new AudioFormat.Builder()
                         .setSampleRate(SAMPLE_RATE)
@@ -276,8 +323,12 @@ public class OfdmModem {
                         && track.getPlaybackHeadPosition() < pcm.length - 32) {
                     Thread.sleep(20);
                 }
-                listener.onStatus("TX OFDM " + item.payload.length + " B ("
-                        + durMs + " ms burst)");
+                if (batch.size() == 1)
+                    listener.onStatus("TX OFDM " + batch.get(0).payload.length
+                            + " B (" + durMs + " ms burst)");
+                else
+                    listener.onStatus("TX batch: " + batch.size()
+                            + " frames (" + durMs + " ms burst)");
             } catch (Exception e) {
                 listener.onStatus("TX error: " + e.getMessage());
             } finally {

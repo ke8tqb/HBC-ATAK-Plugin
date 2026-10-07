@@ -290,6 +290,72 @@ The OFDM frame can carry up to **170 bytes** raw (before FEC). HBC frames
 
 ---
 
+## Channel Access (MAC)
+
+Two channel-access modes exist. The MAC is **behavioral only** — it
+changes WHEN a station keys up, never the bytes on the air. Wire format,
+mesh framing and HBC payloads are identical in both modes, so mixed
+networks interoperate (a Ring station treats a CSMA station's
+transmission as ordinary carrier and defers to it).
+
+### CSMA (legacy)
+
+Listen-before-talk with RMS carrier sense (busy above 4× noise floor or
+an absolute threshold, 400 ms busy-hold), 150–550 ms random backoff and
+an 8 s (Mercury 15 s) give-up. Adequate for 2–5 stations; degrades with
+hidden terminals and VOX hang at larger counts.
+
+### Ring (deterministic rotation)
+
+Designed for up to ~20 stations behind VOX-keyed HTs (reference radios:
+Baofeng UV-5R, Yaesu FT-65 — fixed ~1.0–1.5 s VOX hang, not
+adjustable). Rules (normative):
+
+1. **Roster.** Each station MUST maintain `sort(unique(own callsign +
+   fresh mesh routes))`. The sorted list is the transmit order; the
+   turn "token" is implied, never transmitted. Roster changes MUST be
+   applied only at cycle wrap.
+2. **Turn ownership.** A station MUST transmit data frames only during
+   its own turn (exception: rule 6), and MUST NOT key up while the
+   channel is busy (carrier-sense interlock).
+3. **Turn advance.** Every station advances its local turn pointer on
+   the FIRST of:
+   - *Early release:* carrier attributed to the owner was heard and the
+     channel has then been clear for `GUARD` ms;
+   - *Silent skip:* no carrier within `SKIP` ms of turn start;
+   - *Deadline:* `MAX_TURN + GUARD` ms since turn start (hidden
+     terminals, dead stations).
+4. **Re-alignment.** On decoding any mesh frame, a station SHOULD set
+   its turn pointer to the frame's Transmitter callsign. Decoded
+   frames are authoritative over local timers.
+5. **Joining.** A new station SHOULD listen for one observed cycle (or
+   30 s, whichever comes first) before taking its first turn.
+6. **Emergency preemption.** Mode 2 alert frames MAY be transmitted in
+   an inter-turn idle window after a 0–300 ms random offset. No other
+   traffic may preempt.
+7. **Batching.** During its turn a station SHOULD send all queued
+   frames as ONE continuous keying, up to its per-modem cap (AFSK 4 /
+   OFDM 2 / Mercury 1 frames). On AFSK the first frame carries the
+   full flag preamble (≥300 ms); continuation frames carry a short
+   ~20 ms flag run — the receiving demodulator stays bit-synced across
+   the burst. OFDM/Mercury bursts concatenate with 100 ms gaps.
+
+Parameters (defaults; calibrate `GUARD` as worst measured VOX hang +
+150 ms using the session log's inter-burst timing):
+
+| Parameter | Default | Covers |
+|-----------|---------|--------|
+| GUARD     | 1500 ms | UV-5R / FT-65 VOX hang (~1.0–1.5 s, fixed) |
+| SKIP      | 1200 ms | VOX attack (~250 ms) + carrier-detect latency |
+| MAX_TURN  | auto: AFSK 6000 / OFDM 4400 / Mercury 6000 ms | longest batch |
+| Settle    | 1 cycle (max 30 s) | join listening period |
+| PLI floor | roster × 6 s (Mercury × 10 s) | PLI load ≤ one rotation |
+
+Capacity (20 stations, 5 with traffic per cycle): AFSK ≈ 32 s, OFDM ≈
+35 s, Mercury ≈ 54 s per rotation.
+
+---
+
 ## Adding New Modes
 
 Both `HBCEncoder.java` and `HBCDecoder.java` use dispatch tables for mode

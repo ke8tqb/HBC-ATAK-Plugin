@@ -4,18 +4,102 @@ All notable changes to HBC Audio Plugin are documented here.
 
 ---
 
-## [Unreleased]
+## [0.22] — Ring MAC: deterministic multi-user channel access + TX batching
 
-- prebuilt/: added the TAK Product Center production-signed 0.21
-  civ-release APK for ATAK 5.8.0 (third-party pipeline output from the
-  10-02 submission; signer CN "TAK Product Center ATAK Untrusted
-  Plugin Release"), replacing the 0.20 civ-release APK for that line.
-  The 5.7.0 line stays at the 0.20 release APK — 0.21 was submitted
-  for 5.8 only.
+Channel-access rework for multi-user nets (up to ~20 stations) on VOX
+HTs — reference radios Baofeng UV-5R and Yaesu FT-65, whose ~1.0–1.5 s
+VOX hang is NOT adjustable (FT-65 VOX is ON/OFF only; UV-5R exposes
+only sensitivity). No wire-format change: 0.21 and 0.22 stations
+interoperate on the air.
 
----
+- **Ring MAC (new "Channel access" selector, Audio Setup tab).**
+  Decentralized rotation over the sorted station roster (self + mesh
+  routes — the roster the mesh already learns passively). The schedule
+  IS the sorted callsign list; no coordinator, no token packet, no new
+  frame types. A station transmits only in its own turn; every station
+  advances the turn locally on the FIRST of: early release (carrier
+  heard, then clear for Guard ms), silent skip (owner never keyed
+  within Skip ms), or deadline (Max turn + Guard — keeps the ring
+  alive through hidden terminals and dead stations). Decoded mesh
+  frames re-align everyone's turn pointer to the actual transmitter.
+  Stations never key into a busy channel (interlock), so mixed
+  Ring+CSMA nets degrade safely toward polite CSMA.
+- **Ring settings:** Guard ms (default 1500 — covers the UV-5R/FT-65
+  VOX tail; set it from measured hang + 150 ms), Skip ms (default
+  1200 — covers VOX attack), Max turn ms (0 = auto per modem: AFSK
+  6000, OFDM ~4400, Mercury ~6000). Settings echo in the session-log
+  header (`mac=ring guard=1500ms skip=1200ms`). Recommended companion
+  preset for these HTs: VOX Lead 250 ms.
+- **TX burst batching (all modems, CSMA mode too).** The modem TX loop
+  now drains up to AFSK 4 / OFDM 2 / Mercury 1 queued frames into ONE
+  continuous keying — single lead silence, single VOX leader, single
+  tail — so the radio's VOX hang is paid once per talk burst instead
+  of once per frame. AFSK continuation frames ride the already-synced
+  demod with a short ~20 ms flag run; OFDM/Mercury bursts concatenate
+  with 100 ms re-arm gaps. Log: `TX batch: 3 frames (4120 ms burst)`.
+- **PLI auto-floor (ring mode).** Self-PLI interval is floored at
+  roster × 6 s (Mercury × 10 s) so 20 stations' position reports
+  always fit one rotation.
+- **Emergency preemption.** Mode 2 (911) alerts may transmit in the
+  next inter-turn idle window after a 0–300 ms random offset instead
+  of waiting a full rotation — the single allowed contention
+  exception.
+- **Instrumentation.** New Activity/session-log lines: `Ring: started
+  …`, `Ring: TX turn (3/9, 2 frames)`, `Ring: joined rotation …`,
+  `Ring: roster now N stations (…)`, `Ring: X dormant (3 silent
+  turns)`, `Ring: emergency TX (preempt)`; session-log DBG lines for
+  every sync/skip/early-release/deadline decision.
+- **Docs.** ICD v1.4: §3.4 split into CSMA (legacy) + new §3.5 Ring
+  MAC (rules, parameters, capacity math, UV-5R/FT-65 radio profile and
+  guard-calibration procedure); §6/§7/§8 updated; PDF regenerated.
+  PROTOCOL.md gains a normative "Channel Access (MAC)" chapter. Test
+  campaign checklist (+CSV) gains a MAC section.
+- **Tests.** New JVM suite `codec-test/RingMacTest` (rotation, early
+  release, silent skip, deadline with hidden owner, busy interlock,
+  emergency window, roster-at-wrap, dormancy); all existing suites
+  unchanged and green.
+- **Radio-defaults help.** The Channel access section carries an
+  "ⓘ UV-5R / FT-65 defaults" link that opens a dialog with the
+  recommended values for those radios (Ring, Guard 1500, Skip 1200,
+  Max turn 0, VOX Lead 250, Dwell 500), why their VOX hang cannot be
+  shortened, the Guard calibration procedure, and the hardwired-PTT
+  alternative values.
+- **Compact pane layout.** The four-row header (title, status,
+  countdown, full-width Start button) is now one slim row — status +
+  Next-PLI on the left, a compact Start/Stop button on the right — and
+  the tab buttons shed Android's default 48 dp minimum height. The
+  reclaimed space goes to the scrollable tab content, which was
+  cramped on phone-sized screens.
+- **Decodes is now a full-panel page.** Tapping the Decodes tab hides
+  the header and tab bar so the Packet Decodes list and Live Activity
+  Log get the whole pane; a ◀ Back button returns to the last
+  settings tab.
+- **Tools-menu icon fixed.** ATAK tints Tools-grid icons white, which
+  turned the opaque badge into a solid white square. The Tools entry
+  now uses a transparent-background tower glyph (`ic_tools`) that
+  tints into a clean white graphic; the colored badge remains the app
+  icon shown in TAK Package Mgmt and the plugin manager.
+- **Radio-status toolbar icon removed.** The separate gray/green
+  tap-to-toggle icon (and its "HBC Radio: RUNNING/STOPPED" tooltip
+  entry) is gone — the radio is controlled entirely from the pane's
+  Start/Stop button, leaving a single HBC Radio entry in the Tools
+  menu.
+- **OFDM is the default modem** and the selector now lists OFDM
+  (Rattlegram), Mercury, AX.25/APRS in that order. Stored settings
+  keep the historic encoding, so existing installs retain whatever
+  modem they had selected.
+- **Colored status line.** The header status shows green while the
+  radio link is RUNNING and red while STOPPED.
+- **Build stamp.** While stopped, the header's second line shows
+  `Build {timestamp} · v{version}` so a stale install (same version
+  name, old binary) is spotted at a glance.
+- **Hardened pane binding.** Start/Stop and the tab/Back buttons are
+  wired before any other UI setup, and the remaining wiring runs in a
+  containment block — a failure there now shows a toast naming the
+  exception and leaves the radio controls alive (previously a mid-bind
+  exception left the whole pane unresponsive).
 
-## [0.21] — Field-test fixes (10-02 campaign) + session debug log
+Also landed since 0.21 (previously tracked as unreleased):
 
 - prebuilt/: added the TAK Product Center production-signed 0.21
   civ-release APK for ATAK 5.8.0 (third-party pipeline output from the

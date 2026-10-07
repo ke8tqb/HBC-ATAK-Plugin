@@ -49,14 +49,34 @@ Multi-hop delivery is handled by the mesh layer below, on every modem.
 > bursts — but the plugin does not implement Mercury's ARQ/data-link
 > protocol, so frames will not surface on Mercury's TCP data interface.
 
-## Collision avoidance (CSMA)
+## Channel access — CSMA or Ring MAC
 
-All three modems share an energy-based carrier sense with p-persistent
-backoff (`CsmaSense`): received audio is tracked against an adaptive
-noise floor, and before every transmission the modem waits for a clear
-channel plus a random 150–550 ms that must stay clear. After 8 s (15 s
-on Mercury HF) the frame is sent regardless so traffic is never starved.
-On AFSK the demodulator's DCD is an additional carrier-sense input.
+Two selectable channel-access modes (Audio Setup → "Channel access";
+must match on all stations). The MAC is behavioral only — nothing on
+the air changes — so mixed versions interoperate.
+
+- **CSMA (default, legacy)** — energy-based carrier sense with
+  p-persistent backoff (`CsmaSense`): received audio is tracked against
+  an adaptive noise floor, and before every transmission the modem
+  waits for a clear channel plus a random 150–550 ms that must stay
+  clear. After 8 s (15 s on Mercury HF) the frame is sent regardless so
+  traffic is never starved. On AFSK the demodulator's DCD is an
+  additional carrier-sense input. Fine for 2–5 stations.
+- **Ring MAC (v0.22)** — deterministic rotation for nets up to ~20
+  stations on VOX HTs (reference radios: Baofeng UV-5R / Yaesu FT-65,
+  whose ~1–1.5 s VOX hang is not adjustable). Stations take turns in
+  sorted-roster order (the roster the mesh already learns passively);
+  no coordinator, no token packet. Turns advance on early release
+  (carrier clear + Guard ms), silent skip, or a deadline that rides
+  through hidden terminals. 911 alerts may preempt in the inter-turn
+  gap. An ⓘ help link in the pane gives the recommended UV-5R/FT-65
+  values (Guard 1500, Skip 1200, VOX Lead 250). See `docs/PROTOCOL.md`
+  ("Channel Access") and ICD §3.5.
+
+In both modes the TX path **batches** queued frames into one continuous
+keying (AFSK 4 / OFDM 2 / Mercury 1 frames per burst), so the radio's
+VOX key-up/hang cycle is paid once per talk burst instead of once per
+frame.
 
 ## Mesh networking
 
@@ -94,20 +114,28 @@ modems:
   CoT type, MIL-STD-2525 / spot-map / custom-iconset icon reference, and
   color tint
 
-## Settings (in-plugin pane, Settings tab)
+## Settings (in-plugin pane)
 
-- Ham callsign (ITA2-validated, max 8 chars) — required
-- Modem selection (AFSK1200/AX.25, OFDM, or Mercury HF) — must match on
-  all stations
-- TX audio stream (Alarm / Media / Ring / Notification) — Alarm bypasses
-  Samsung media DSP that distorts FSK tones
-- Send to — Broadcast, or route markers/points direct to any station
-  learned from the mesh
-- TX dwell (TXDelay preamble) and VOX leader tone duration
-- PLI rate limit; per-message-type transmit toggles; TX/RX enables
+Three tabs under an always-visible header (colored status line — green
+RUNNING / red STOPPED — plus a build stamp while stopped, and the
+Start/Stop button):
 
-A dedicated **Decodes** tab shows every received packet with timestamp,
-source, mode summary, and payload size.
+- **Audio Setup** — modem selection (OFDM default; OFDM / Mercury /
+  AX.25-APRS, must match on all stations), TX audio stream (Alarm /
+  Media / Ring / Notification — Alarm bypasses Samsung media DSP that
+  distorts FSK tones), AFSK TX level %, TX dwell (TXDelay preamble),
+  VOX leader duration, and Channel access (CSMA / Ring) with Guard /
+  Skip / Max-turn fields and the ⓘ UV-5R / FT-65 defaults help dialog
+- **Options** — ham callsign (ITA2-validated, max 8 chars; required),
+  Send-to (Broadcast, or route markers/points direct to any station
+  learned from the mesh), PLI rate limit, TX/RX enables,
+  per-message-type transmit toggles
+- **Decodes** — a full-panel page (◀ Back returns to settings) showing
+  every received packet with timestamp, source, mode summary and
+  payload size, above the live activity log
+
+Every radio session also records a detailed debug log offered for
+saving to Downloads on Stop (v0.21).
 
 ## Install
 
@@ -182,14 +210,16 @@ Pipeline source-archive requirements and how this repo meets them:
 `codec-test/` contains JVM-runnable reference-vector tests
 (`HbcCodecTest`, `Mode6Test`) verifying byte-for-byte parity with the
 Python [HBC-Protocol](https://github.com/ke8tqb/HBC-Protocol)
-implementation, plus `DemodFile` for running recorded audio through the
-demodulator offline.
+implementation, `MeshRouterTest` (mesh framing/routing vectors),
+`RingMacTest` (Ring MAC turn rules under a scripted clock), plus
+`DemodFile` for running recorded audio through the demodulator offline.
 
 ## Documentation
 
 - [`docs/HBC_ICD.html`](docs/HBC_ICD.html) ([PDF](docs/HBC_ICD.pdf)) —
-  Interface Control Document v1.3: per-control GUI reference with
-  annotated screenshots, wire formats, and log interpretation guides
+  Interface Control Document v1.4: per-control GUI reference with
+  annotated screenshots, wire formats, channel-access (CSMA/Ring MAC)
+  specification, and log interpretation guides
 - [`docs/PROTOCOL.md`](docs/PROTOCOL.md),
   [`docs/RADIO_SETUP.md`](docs/RADIO_SETUP.md),
   [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md)

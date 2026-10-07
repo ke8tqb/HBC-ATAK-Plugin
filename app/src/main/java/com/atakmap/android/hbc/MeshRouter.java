@@ -72,6 +72,12 @@ public final class MeshRouter {
         /** Hand a fully built mesh frame to the active modem. */
         void transmitFrame(byte[] frame);
         void onStatus(String message);
+        /**
+         * Any frame was decoded with this transmitter callsign — hard
+         * evidence of who holds the channel right now (used by the Ring
+         * MAC to keep all stations' turn pointers converged).
+         */
+        default void onHeardTransmitter(String transmitter) {}
     }
 
     private static final class Route {
@@ -232,6 +238,9 @@ public final class MeshRouter {
             int seq = ((f[11] & 0xFF) << 8) | (f[12] & 0xFF);
             if (origin.isEmpty() || origin.equalsIgnoreCase(myCall))
                 return;   // own packet heard back — never route self
+
+            if (!transmitter.isEmpty() && !transmitter.equalsIgnoreCase(myCall))
+                cb.onHeardTransmitter(transmitter);
 
             String sig = origin + "|" + seq + "|" + type;
             boolean duplicate = checkAndCache(sig);

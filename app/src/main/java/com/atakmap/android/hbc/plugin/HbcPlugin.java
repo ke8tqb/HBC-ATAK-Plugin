@@ -22,6 +22,7 @@ import com.atakmap.android.hbc.Ita2;
 import com.atakmap.android.hbc.MercuryModem;
 import com.atakmap.android.hbc.MeshRouter;
 import com.atakmap.android.hbc.OfdmModem;
+import com.atakmap.android.hbc.RingMac;
 import com.atakmap.comms.CommsMapComponent;
 import com.atakmap.coremap.cot.event.CotEvent;
 import com.atakmap.coremap.log.Log;
@@ -69,7 +70,6 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
     Context pluginContext;
     IHostUIService uiService;
     ToolbarItem toolbarItem;
-    ToolbarItem radioStatusItem;
     Pane pane;
 
     private SharedPreferences prefs;
@@ -77,18 +77,27 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
     private OfdmModem ofdm;
     private MercuryModem mercury;
     private MeshRouter mesh;
+    private RingMac ringMac;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
+
+    // Frames waiting for this station's Ring MAC turn (ring mode only;
+    // under CSMA frames go straight to the modem queue as before)
+    private final java.util.ArrayDeque<byte[]> ringPending = new java.util.ArrayDeque<>();
 
     // UI
     private EditText etCallsign, etDwell, etVoxLeader, etPliRate, etAfskLevel;
-    private android.widget.Spinner spTxStream, spModem, spSendTo;
+    private EditText etRingGuard, etRingSkip, etRingMaxTurn;
+    private android.widget.Spinner spTxStream, spModem, spSendTo, spMacMode;
     private CheckBox cbTxEnable, cbRxEnable, cbSelfPli, cbChat, cbAlerts, cbShapes,
             cbCasevac, cbSpots;
     private Button btnStartStop;
     private TextView tvStatus, tvLog, tvPliCountdown;
     private boolean pliTickerRunning = false;
     private View tabAudio, tabOptions, tabDecodes;
-    private Button btnTabAudio, btnTabOptions, btnTabDecodes, btnDecodesClear;
+    private View headerView, tabBarView;
+    private int lastConfigTab = 0;   // tab to return to from the Decodes page
+    private Button btnTabAudio, btnTabOptions, btnTabDecodes, btnDecodesClear,
+            btnDecodesBack;
     private TextView tvDecodes, tvDecodesCount;
     private android.widget.ScrollView svDecodes;
     private int decodeCount = 0;
@@ -143,11 +152,14 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
         }
         uiService = serviceController.getService(IHostUIService.class);
 
+        // Tools-grid items are tinted white by ATAK, so the toolbar icon
+        // must be an alpha silhouette (ic_tools), not the opaque badge
+        // (ic_launcher stays as the app/package-manager icon).
         toolbarItem = new ToolbarItem.Builder(
                 pluginContext.getString(R.string.app_name),
                 MarshalManager.marshal(
                         rasterize(pluginContext.getResources()
-                                .getDrawable(R.drawable.ic_launcher), 192),
+                                .getDrawable(R.drawable.ic_tools), 192),
                         android.graphics.drawable.Drawable.class,
                         gov.tak.api.commons.graphics.Bitmap.class))
                 .setListener(new ToolbarItemAdapter() {
@@ -162,8 +174,7 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
     /**
      * Draw any drawable (vectors included) into an ARGB bitmap. The TAK
      * drawable→bitmap marshaler only handles bitmap-backed drawables, so a
-     * VectorDrawable passed straight in comes out as a blank square — the
-     * same reason renderRadioIcon() rasterizes the radio glyphs.
+     * VectorDrawable passed straight in comes out as a blank square.
      */
     private android.graphics.drawable.Drawable rasterize(
             android.graphics.drawable.Drawable d, int px) {
@@ -182,7 +193,6 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
             return;
         uiService.addToolbarItem(toolbarItem);
         prefs = pluginContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-        updateRadioStatusIcon();
     }
 
     @Override
@@ -190,111 +200,12 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
         stopRadio();
         if (uiService == null)
             return;
-        if (radioStatusItem != null) {
-            uiService.removeToolbarItem(radioStatusItem);
-            radioStatusItem = null;
-        }
         uiService.removeToolbarItem(toolbarItem);
     }
 
-    /**
-     * Toolbar radio icon reflecting the radio-link state: electric green
-     * while the audio modem is running, gray when stopped. Follows the same
-     * `started` flag as the Start/Stop Radio Link button, so the two can
-     * never disagree.
-     *
-     * Tap toggles the modem on/off (the plugin pane stays reachable via
-     * the main HBC toolbar icon). ATAK core consumes long-presses to show
-     * the item tooltip, so the tooltip title carries the modem state
-     * ("HBC Radio: RUNNING/STOPPED") instead of a long-press action.
-     *
-     * ToolbarItems are immutable, so the item is rebuilt on state change —
-     * a fixed identifier keeps ATAK treating it as the same tool, so a
-     * user-dragged toolbar placement survives the swap. The vector icon is
-     * rasterized at high resolution so it stays as sharp as the stock icons.
-     */
-    private static final String RADIO_STATUS_ID = "hbc-radio-status";
-
-    private void updateRadioStatusIcon() {
-        if (uiService == null || pluginContext == null)
-            return;
-        try {
-            if (radioStatusItem != null)
-                uiService.removeToolbarItem(radioStatusItem);
-            String title = pluginContext.getString(started
-                    ? R.string.hbc_radio_status_on
-                    : R.string.hbc_radio_status_off);
-            radioStatusItem = new ToolbarItem.Builder(
-                    title,
-                    MarshalManager.marshal(renderRadioIcon(),
-                            android.graphics.drawable.Drawable.class,
-                            gov.tak.api.commons.graphics.Bitmap.class))
-                    .setIdentifier(RADIO_STATUS_ID)
-                    .setListener(new ToolbarItemAdapter() {
-                        @Override
-                        public void onClick(ToolbarItem item) {
-                            toggleRadioFromIcon();   // tap toggles the modem
-                        }
-                    })
-                    .build();
-            uiService.addToolbarItem(radioStatusItem);
-        } catch (Exception e) {
-            Log.d(TAG, "radio status icon update failed: " + e.getMessage());
-        }
-    }
-
-    /**
-     * Rasterize the state-colored vector at 192 px so it stays sharp.
-     * When the modem is running, a soft light-green radial glow is painted
-     * behind the icon ("backlit" look).
-     */
-    private android.graphics.drawable.Drawable renderRadioIcon() {
-        android.graphics.drawable.Drawable vector = pluginContext.getResources()
-                .getDrawable(started ? R.drawable.ic_radio_on
-                                     : R.drawable.ic_radio_off);
-        int px = 192;
-        android.graphics.Bitmap bmp = android.graphics.Bitmap.createBitmap(
-                px, px, android.graphics.Bitmap.Config.ARGB_8888);
-        android.graphics.Canvas canvas = new android.graphics.Canvas(bmp);
-        if (started) {
-            // backlit glow: light green, bright at center, fading to clear
-            float c = px / 2f;
-            android.graphics.Paint glow = new android.graphics.Paint(
-                    android.graphics.Paint.ANTI_ALIAS_FLAG);
-            glow.setShader(new android.graphics.RadialGradient(
-                    c, c, c,
-                    new int[]{0xB4A8FFB0, 0x6E7CFF8C, 0x00000000},
-                    new float[]{0f, 0.55f, 1f},
-                    android.graphics.Shader.TileMode.CLAMP));
-            canvas.drawCircle(c, c, c, glow);
-        }
-        // inset the glyph slightly so the glow forms a visible halo
-        int inset = px / 8;
-        vector.setBounds(inset, inset, px - inset, px - inset);
-        vector.draw(canvas);
-        return new android.graphics.drawable.BitmapDrawable(
-                pluginContext.getResources(), bmp);
-    }
-
-    /** Tap on the toolbar radio icon: start/stop the modem. */
-    private void toggleRadioFromIcon() {
-        if (started) {
-            SessionLog finished = sessionLog;
-            stopRadio();
-            promptSaveSessionLog(finished);
-            toast("HBC radio link stopped");
-        } else {
-            if (prefs == null || prefs.getString("callsign", "").isEmpty()) {
-                toast("Set your callsign in HBC settings first");
-                showPane();
-                return;
-            }
-            startRadio();
-            toast(started ? "HBC radio link started"
-                          : "HBC radio link failed to start — see log");
-        }
-        mainHandler.post(this::updateUiState);
-    }
+    // NOTE: the separate radio-status toolbar icon (gray/green, tap to
+    // toggle the modem) was removed in 0.22 — the radio is controlled
+    // entirely from the plugin pane's Start/Stop button.
 
     // ------------------------------------------------------------------
     // UI
@@ -315,11 +226,66 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
     }
 
     private void bindViews(View v) {
+        // CORE CONTROLS FIRST. If anything in the secondary wiring below
+        // throws (bad cached resources after a same-version reinstall,
+        // adapter/resource trouble, etc.), Start/Stop and the tab switcher
+        // must already be alive — a mid-bind exception previously left
+        // every later listener unbound and the pane looked "dead".
+        btnStartStop  = v.findViewById(R.id.hbc_start_stop);
+        tvStatus      = v.findViewById(R.id.hbc_status);
+        headerView    = v.findViewById(R.id.hbc_header);
+        tabBarView    = v.findViewById(R.id.hbc_tabbar);
+        tabAudio      = v.findViewById(R.id.hbc_tab_audio);
+        tabOptions    = v.findViewById(R.id.hbc_tab_options);
+        tabDecodes    = v.findViewById(R.id.hbc_tab_decodes);
+        btnTabAudio   = v.findViewById(R.id.hbc_tab_btn_audio);
+        btnTabOptions = v.findViewById(R.id.hbc_tab_btn_options);
+        btnTabDecodes = v.findViewById(R.id.hbc_tab_btn_decodes);
+        btnDecodesBack = v.findViewById(R.id.hbc_decodes_back);
+
+        btnStartStop.setOnClickListener(view -> {
+            if (started) {
+                SessionLog finished = sessionLog;
+                stopRadio();
+                promptSaveSessionLog(finished);
+            } else {
+                if (validateAndSavePrefs())
+                    startRadio();
+            }
+            updateUiState();
+        });
+        btnTabAudio.setOnClickListener(view -> selectTab(0));
+        btnTabOptions.setOnClickListener(view -> selectTab(1));
+        btnTabDecodes.setOnClickListener(view -> selectTab(2));
+        if (btnDecodesBack != null)
+            btnDecodesBack.setOnClickListener(view -> selectTab(lastConfigTab));
+        selectTab(0);
+
+        try {
+            bindSecondaryViews(v);
+        } catch (Throwable t) {
+            Log.e(TAG, "secondary UI wiring failed", t);
+            toast("HBC: settings UI partly failed to load ("
+                    + t.getClass().getSimpleName()
+                    + ") — uninstall and reinstall the plugin");
+        }
+
+        updateUiState();
+    }
+
+    /** Everything beyond the core controls; failures here are contained. */
+    private void bindSecondaryViews(View v) {
         etCallsign  = v.findViewById(R.id.hbc_callsign);
         etDwell     = v.findViewById(R.id.hbc_dwell);
         etVoxLeader = v.findViewById(R.id.hbc_vox_leader);
         etPliRate   = v.findViewById(R.id.hbc_pli_rate);
         etAfskLevel = v.findViewById(R.id.hbc_afsk_level);
+        etRingGuard   = v.findViewById(R.id.hbc_ring_guard);
+        etRingSkip    = v.findViewById(R.id.hbc_ring_skip);
+        etRingMaxTurn = v.findViewById(R.id.hbc_ring_maxturn);
+        View macHelp = v.findViewById(R.id.hbc_mac_help);
+        if (macHelp != null)
+            macHelp.setOnClickListener(view -> showMacHelp());
         cbTxEnable  = v.findViewById(R.id.hbc_tx_enable);
         cbRxEnable  = v.findViewById(R.id.hbc_rx_enable);
         cbSelfPli   = v.findViewById(R.id.hbc_mode_pli);
@@ -328,24 +294,24 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
         cbChat      = v.findViewById(R.id.hbc_mode_chat);
         cbShapes    = v.findViewById(R.id.hbc_mode_shapes);
         cbCasevac   = v.findViewById(R.id.hbc_mode_casevac);
-        btnStartStop = v.findViewById(R.id.hbc_start_stop);
-        tvStatus    = v.findViewById(R.id.hbc_status);
         tvPliCountdown = v.findViewById(R.id.hbc_pli_countdown);
         tvLog       = v.findViewById(R.id.hbc_log);
-        tvLog.setMovementMethod(new ScrollingMovementMethod());
+        if (tvLog != null)
+            tvLog.setMovementMethod(new ScrollingMovementMethod());
         startPliTicker();
 
-        // tabs: Audio Setup / Options / Decodes
-        tabAudio      = v.findViewById(R.id.hbc_tab_audio);
-        tabOptions    = v.findViewById(R.id.hbc_tab_options);
-        tabDecodes    = v.findViewById(R.id.hbc_tab_decodes);
-        btnTabAudio   = v.findViewById(R.id.hbc_tab_btn_audio);
-        btnTabOptions = v.findViewById(R.id.hbc_tab_btn_options);
-        btnTabDecodes = v.findViewById(R.id.hbc_tab_btn_decodes);
         tvDecodes      = v.findViewById(R.id.hbc_decodes);
         tvDecodesCount = v.findViewById(R.id.hbc_decodes_count);
         svDecodes      = v.findViewById(R.id.hbc_decodes_scroll);
         btnDecodesClear = v.findViewById(R.id.hbc_decodes_clear);
+        if (btnDecodesClear != null)
+            btnDecodesClear.setOnClickListener(view -> {
+                decodeCount = 0;
+                if (tvDecodes != null) tvDecodes.setText("");
+                if (tvDecodesCount != null)
+                    tvDecodesCount.setText(
+                            pluginContext.getString(R.string.hbc_decodes_none));
+            });
 
         spTxStream = v.findViewById(R.id.hbc_tx_stream);
         android.widget.ArrayAdapter<CharSequence> streamAdapter =
@@ -365,34 +331,19 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
                 android.R.layout.simple_spinner_dropdown_item);
         spModem.setAdapter(modemAdapter);
 
+        spMacMode = v.findViewById(R.id.hbc_mac_mode);
+        android.widget.ArrayAdapter<CharSequence> macAdapter =
+                android.widget.ArrayAdapter.createFromResource(pluginContext,
+                        R.array.hbc_mac_options,
+                        android.R.layout.simple_spinner_item);
+        macAdapter.setDropDownViewResource(
+                android.R.layout.simple_spinner_dropdown_item);
+        spMacMode.setAdapter(macAdapter);
+
         spSendTo = v.findViewById(R.id.hbc_send_to);
         refreshSendTo();
 
-        btnTabAudio.setOnClickListener(view -> selectTab(0));
-        btnTabOptions.setOnClickListener(view -> selectTab(1));
-        btnTabDecodes.setOnClickListener(view -> selectTab(2));
-        btnDecodesClear.setOnClickListener(view -> {
-            decodeCount = 0;
-            tvDecodes.setText("");
-            tvDecodesCount.setText(pluginContext.getString(R.string.hbc_decodes_none));
-        });
-        selectTab(0);
-
         loadPrefs();
-
-        btnStartStop.setOnClickListener(view -> {
-            if (started) {
-                SessionLog finished = sessionLog;
-                stopRadio();
-                promptSaveSessionLog(finished);
-            } else {
-                if (validateAndSavePrefs())
-                    startRadio();
-            }
-            updateUiState();
-        });
-
-        updateUiState();
     }
 
     /**
@@ -439,7 +390,10 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
         if (tvPliCountdown == null) return;
         String text;
         if (!started) {
-            text = "Next PLI: \u2014 (radio off)";
+            // While stopped, show WHICH binary is installed — instantly
+            // exposes a stale install in the field.
+            text = "Build " + BuildConfig.BUILD_STAMP
+                    + " \u00b7 v" + BuildConfig.VERSION_NAME;
         } else if (!prefs.getBoolean("tx_enable", true)
                 || !prefs.getBoolean("mode_pli", true)) {
             text = "Next PLI: disabled";
@@ -458,12 +412,22 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
         tvPliCountdown.setText(text);
     }
 
-    /** 0 = Audio Setup, 1 = Options, 2 = Decodes */
+    /**
+     * 0 = Audio Setup, 1 = Options, 2 = Decodes. The Decodes view is a
+     * full-panel page: it hides the header and tab bar and is left via
+     * its own Back button (returns to the last config tab).
+     */
     private void selectTab(int tab) {
         if (tabAudio == null) return;
+        boolean fullPage = tab == 2;
+        if (!fullPage) lastConfigTab = tab;
+        if (headerView != null)
+            headerView.setVisibility(fullPage ? View.GONE : View.VISIBLE);
+        if (tabBarView != null)
+            tabBarView.setVisibility(fullPage ? View.GONE : View.VISIBLE);
         tabAudio.setVisibility(tab == 0 ? View.VISIBLE : View.GONE);
         tabOptions.setVisibility(tab == 1 ? View.VISIBLE : View.GONE);
-        tabDecodes.setVisibility(tab == 2 ? View.VISIBLE : View.GONE);
+        tabDecodes.setVisibility(fullPage ? View.VISIBLE : View.GONE);
         btnTabAudio.setEnabled(tab != 0);
         btnTabOptions.setEnabled(tab != 1);
         btnTabDecodes.setEnabled(tab != 2);
@@ -487,10 +451,31 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
         if (spTxStream != null)
             spTxStream.setSelection(prefs.getInt("tx_stream", 0));
         if (spModem != null)
-            spModem.setSelection(prefs.getInt("modem_type", 0));
+            spModem.setSelection(modemTypeToPos(prefs.getInt("modem_type", 1)));
+        if (spMacMode != null)
+            spMacMode.setSelection(prefs.getInt("mac_mode", 0));
+        if (etRingGuard != null)
+            etRingGuard.setText(String.valueOf(
+                    prefs.getInt("ring_guard_ms", RingMac.DEFAULT_GUARD_MS)));
+        if (etRingSkip != null)
+            etRingSkip.setText(String.valueOf(
+                    prefs.getInt("ring_skip_ms", RingMac.DEFAULT_SKIP_MS)));
+        if (etRingMaxTurn != null)
+            etRingMaxTurn.setText(String.valueOf(
+                    prefs.getInt("ring_max_turn_ms", 0)));
     }
 
     private boolean validateAndSavePrefs() {
+        if (etCallsign == null) {
+            // Secondary UI failed to bind: run from the previously saved
+            // settings instead of blocking the radio entirely.
+            String saved = prefs.getString("callsign", "");
+            if (saved.isEmpty()) {
+                toast("Settings fields unavailable — reinstall the plugin");
+                return false;
+            }
+            return true;
+        }
         String callsign = etCallsign.getText().toString().trim().toUpperCase();
         if (callsign.isEmpty()) {
             toast("Enter your ham radio callsign first");
@@ -523,8 +508,18 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
                 .putBoolean("mode_casevac", cbCasevac.isChecked())
                 .putInt("tx_stream", spTxStream == null ? 0
                         : spTxStream.getSelectedItemPosition())
-                .putInt("modem_type", spModem == null ? 0
-                        : spModem.getSelectedItemPosition())
+                .putInt("modem_type", spModem == null ? 1
+                        : modemPosToType(spModem.getSelectedItemPosition()))
+                .putInt("mac_mode", spMacMode == null ? 0
+                        : spMacMode.getSelectedItemPosition())
+                .putInt("ring_guard_ms", etRingGuard == null
+                        ? RingMac.DEFAULT_GUARD_MS
+                        : Math.max(100, intOf(etRingGuard, RingMac.DEFAULT_GUARD_MS)))
+                .putInt("ring_skip_ms", etRingSkip == null
+                        ? RingMac.DEFAULT_SKIP_MS
+                        : Math.max(200, intOf(etRingSkip, RingMac.DEFAULT_SKIP_MS)))
+                .putInt("ring_max_turn_ms", etRingMaxTurn == null ? 0
+                        : Math.max(0, intOf(etRingMaxTurn, 0)))
                 .apply();
         return true;
     }
@@ -540,10 +535,60 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
     private void updateUiState() {
         if (btnStartStop == null) return;
         btnStartStop.setText(started ? "Stop Radio Link" : "Start Radio Link");
-        if (tvStatus != null)
+        if (tvStatus != null) {
             tvStatus.setText(started
-                    ? "RUNNING as " + prefs.getString("callsign", "?")
-                    : "STOPPED");
+                    ? "HBC Radio \u2014 RUNNING as " + prefs.getString("callsign", "?")
+                    : "HBC Radio \u2014 STOPPED");
+            // green while running, red while stopped
+            tvStatus.setTextColor(started ? 0xFF00E676 : 0xFFFF5252);
+        }
+    }
+
+    /**
+     * The modem spinner displays OFDM, Mercury, AX.25 (in that order, OFDM
+     * default) but the stored pref keeps the historic encoding
+     * 0=AFSK 1=OFDM 2=Mercury so existing installs keep their selection.
+     */
+    private static int modemPosToType(int pos) {
+        switch (pos) {
+            case 0:  return 1;   // OFDM
+            case 1:  return 2;   // Mercury
+            default: return 0;   // AX.25/AFSK
+        }
+    }
+
+    private static int modemTypeToPos(int type) {
+        switch (type) {
+            case 1:  return 0;   // OFDM
+            case 2:  return 1;   // Mercury
+            default: return 2;   // AX.25/AFSK
+        }
+    }
+
+    /**
+     * Help dialog for the Channel access section: recommended Ring/VOX
+     * values for the reference radios (Baofeng UV-5R, Yaesu FT-65).
+     */
+    private void showMacHelp() {
+        mainHandler.post(() -> {
+            android.content.Context dlgCtx;
+            try {
+                dlgCtx = com.atakmap.android.maps.MapView.getMapView().getContext();
+            } catch (Throwable t) {
+                dlgCtx = null;
+            }
+            if (dlgCtx == null) dlgCtx = pluginContext;
+            try {
+                new android.app.AlertDialog.Builder(dlgCtx)
+                        .setTitle(pluginContext.getString(R.string.hbc_mac_help_title))
+                        .setMessage(pluginContext.getString(R.string.hbc_mac_help_text))
+                        .setPositiveButton("Close", (d, w) -> d.dismiss())
+                        .setCancelable(true)
+                        .show();
+            } catch (Throwable t) {
+                toast("UV-5R/FT-65: Ring, Guard 1500, Skip 1200, Max turn 0, VOX Lead 250");
+            }
+        });
     }
 
     // ------------------------------------------------------------------
@@ -551,7 +596,7 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
     // ------------------------------------------------------------------
     /** 0 = AFSK1200, 1 = OFDM (COFDMTV), 2 = Mercury HF (FreeDV DATAC) */
     private int modemType() {
-        return prefs.getInt("modem_type", 0);
+        return prefs.getInt("modem_type", 1);   // default OFDM
     }
 
     private String modemName() {
@@ -565,6 +610,10 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
     private synchronized void startRadio() {
         if (started) return;
         try {
+            boolean ringMode = prefs.getInt("mac_mode", 0) == 1;
+            int ringGuard = prefs.getInt("ring_guard_ms", RingMac.DEFAULT_GUARD_MS);
+            int ringSkip = prefs.getInt("ring_skip_ms", RingMac.DEFAULT_SKIP_MS);
+            int ringMaxTurn = prefs.getInt("ring_max_turn_ms", 0);
             // fresh detailed session log (replaces any unsaved previous one)
             sessionLog = new SessionLog(
                     prefs.getString("callsign", ""), modemName(),
@@ -573,6 +622,8 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
                     + "ms pliRate=" + prefs.getInt("pli_rate_s", 60)
                     + "s stream=" + prefs.getInt("tx_stream", 0)
                     + " afskLevel=" + prefs.getInt("afsk_tx_level_pct", 50) + "%"
+                    + " mac=" + (ringMode ? "ring guard=" + ringGuard
+                            + "ms skip=" + ringSkip + "ms" : "csma")
                     + " sendTo=" + prefs.getString("send_to", "(broadcast)")
                     + " tx=" + prefs.getBoolean("tx_enable", true)
                     + " rx=" + prefs.getBoolean("rx_enable", true));
@@ -615,15 +666,37 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
                             if (message.startsWith("Mesh: route"))
                                 mainHandler.post(HbcPlugin.this::refreshSendTo);
                         }
+                        @Override
+                        public void onHeardTransmitter(String transmitter) {
+                            RingMac rm = ringMac;
+                            if (rm != null) rm.onHeardTransmitter(transmitter);
+                        }
                     });
             // Announces are automatic: our own traffic (PLI broadcasts etc.)
             // acts as the announce via passive route learning; a real mesh
             // announce only goes out as a keepalive after 10 quiet minutes.
             mesh.setAnnounceIntervalMin(10);
             mesh.start();
+
+            // Ring MAC: deterministic rotation replaces CSMA contention
+            if (ringMode) {
+                synchronized (ringPending) { ringPending.clear(); }
+                ringMac = new RingMac(prefs.getString("callsign", ""), ringHooks());
+                ringMac.setGuardMs(ringGuard);
+                ringMac.setSkipMs(ringSkip);
+                int autoTurn, framesPerTurn;
+                switch (modemType()) {
+                    case 1:  autoTurn = 4400; framesPerTurn = 2; break;
+                    case 2:  autoTurn = 6000; framesPerTurn = 1; break;
+                    default: autoTurn = 6000; framesPerTurn = 4; break;
+                }
+                ringMac.setMaxTurnMs(ringMaxTurn > 0 ? ringMaxTurn : autoTurn);
+                ringMac.setMaxFramesPerTurn(framesPerTurn);
+                ringMac.start();
+            }
+
             CommsMapComponent.getInstance().registerPreSendProcessor(this);
             started = true;
-            mainHandler.post(this::updateRadioStatusIcon);
             log("Radio link started (" + modemName() + ", mesh routing)");
         } catch (Throwable e) {
             Log.e(TAG, "start failed", e);
@@ -637,6 +710,8 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
             try {
                 CommsMapComponent.getInstance().registerPreSendProcessor(null);
             } catch (Exception ignored) {}
+            if (ringMac != null) { ringMac.stop(); ringMac = null; }
+            synchronized (ringPending) { ringPending.clear(); }
             if (mesh != null)    { mesh.stop();    mesh = null; }
             if (modem != null)   { modem.stop();   modem = null; }
             if (ofdm != null)    { ofdm.stop();    ofdm = null; }
@@ -644,23 +719,101 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
         }
         if (started) log("Radio link stopped");
         started = false;
-        mainHandler.post(this::updateRadioStatusIcon);
+        mainHandler.post(this::updateUiState);
     }
 
-    /** Hand a mesh frame to whichever modem is active (dumb byte pipe). */
+    /**
+     * Hand a mesh frame toward the air. Under CSMA it goes straight to the
+     * active modem's queue; under the Ring MAC it waits in ringPending
+     * until this station's turn (RingMac releases it via releaseFrames).
+     */
     private void txFrame(byte[] frame) {
         try {
-            String myCall = prefs.getString("callsign", "");
             sessionDebug("TX mesh frame " + frame.length + " B: " + hex(frame));
-            if (ofdm != null)
-                ofdm.transmit(myCall, frame);
-            else if (mercury != null)
-                mercury.transmit(myCall, frame);
-            else if (modem != null)
-                modem.transmit(DEFAULT_DEST, myCall, new String[0], frame);
+            if (ringMac != null) {
+                synchronized (ringPending) {
+                    ringPending.addLast(frame);
+                }
+                return;
+            }
+            sendFrameToModem(frame);
         } catch (Exception e) {
             log("TX error: " + e);
         }
+    }
+
+    /** Push one mesh frame into whichever modem is active (dumb byte pipe). */
+    private void sendFrameToModem(byte[] frame) {
+        String myCall = prefs.getString("callsign", "");
+        if (ofdm != null)
+            ofdm.transmit(myCall, frame);
+        else if (mercury != null)
+            mercury.transmit(myCall, frame);
+        else if (modem != null)
+            modem.transmit(DEFAULT_DEST, myCall, new String[0], frame);
+    }
+
+    /** RingMac's window into the plugin: channel state, roster, TX queue. */
+    private RingMac.Hooks ringHooks() {
+        return new RingMac.Hooks() {
+            @Override
+            public long nowMs() {
+                return System.currentTimeMillis();
+            }
+            @Override
+            public boolean channelBusy() {
+                AudioModem m = modem;
+                OfdmModem o = ofdm;
+                MercuryModem h = mercury;
+                if (m != null) return m.isChannelBusy();
+                if (o != null) return o.isChannelBusy();
+                if (h != null) return h.isChannelBusy();
+                return false;
+            }
+            @Override
+            public boolean transmitting() {
+                AudioModem m = modem;
+                OfdmModem o = ofdm;
+                MercuryModem h = mercury;
+                if (m != null && m.isTransmitting()) return true;
+                if (o != null && o.isTransmitting()) return true;
+                return h != null && h.isTransmitting();
+            }
+            @Override
+            public java.util.List<String> meshRoster() {
+                MeshRouter ms = mesh;
+                return ms != null ? ms.knownDestinations()
+                                  : java.util.Collections.emptyList();
+            }
+            @Override
+            public int pendingFrames() {
+                synchronized (ringPending) {
+                    return ringPending.size();
+                }
+            }
+            @Override
+            public int releaseFrames(int max) {
+                int n = 0;
+                while (n < max) {
+                    byte[] f;
+                    synchronized (ringPending) {
+                        f = ringPending.pollFirst();
+                    }
+                    if (f == null) break;
+                    sendFrameToModem(f);
+                    n++;
+                }
+                return n;
+            }
+            @Override
+            public void onStatus(String message) {
+                log(message);
+            }
+            @Override
+            public void onDebug(String message) {
+                sessionDebug(message);
+            }
+        };
     }
 
     /** Debug-only session log entry (not shown in the Activity Log). */
@@ -789,9 +942,22 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
             }
 
             // PLI rate limit — applies ONLY to the station's own position
-            // reports, never to placed markers
+            // reports, never to placed markers. Under the Ring MAC the
+            // interval is floored by roster size so 20 stations' PLIs
+            // always fit one rotation (6 s/station; 10 s on Mercury).
             if (selfPli) {
                 long minInterval = prefs.getInt("pli_rate_s", 60) * 1000L;
+                RingMac rm = ringMac;
+                if (rm != null) {
+                    long perStation = modemType() == 2 ? 10_000L : 6_000L;
+                    long floor = rm.rosterSize() * perStation;
+                    if (floor > minInterval) {
+                        minInterval = floor;
+                        sessionDebug("Ring: PLI interval floored to "
+                                + (floor / 1000) + " s (" + rm.rosterSize()
+                                + " stations)");
+                    }
+                }
                 long now = System.currentTimeMillis();
                 if (now - lastPliTxMs < minInterval) {
                     log("TX skip: PLI rate limit");
@@ -825,6 +991,12 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
                     mesh.sendBroadcast(enc.bytes);
             }
             log("Queued TX mode " + enc.mode + " (" + enc.bytes.length + " B) " + type);
+
+            // 911 alerts may preempt the ring's turn order: they transmit
+            // in the next inter-turn idle window instead of waiting a full
+            // rotation (the single allowed contention exception).
+            if (enc.mode == 2 && ringMac != null)
+                ringMac.flagEmergency();
 
             // v1.6: remember outgoing DM tags so incoming Mode 0 acks can be
             // mapped back to the original messageId (delivered/read checkmark).
