@@ -109,6 +109,11 @@ public final class RingMac {
     // emergency preemption (Mode 2 alerts)
     private long emergencyAtMs = 0;
 
+    // measured rotation time (EMA of wrap-to-wrap intervals): feeds the
+    // mesh layer's Ring-aware retry pacing (v0.23)
+    private long lastWrapMs = 0;
+    private long cycleEmaMs = 0;
+
     public RingMac(String myCallsign, Hooks hooks) {
         this.myCall = myCallsign.toUpperCase(Locale.US);
         this.hooks = hooks;
@@ -126,6 +131,21 @@ public final class RingMac {
     /** Current roster size (for the PLI auto-floor). */
     public synchronized int rosterSize() {
         return Math.max(1, roster.size());
+    }
+
+    /**
+     * Measured full-rotation time (EMA of wrap-to-wrap intervals), or a
+     * conservative skip/guard-based estimate before the first measured
+     * wrap. Feeds the mesh ARQ's Ring-aware retry pacing (v0.23): a
+     * retry fired sooner than one rotation cannot possibly have given
+     * the ACK a chance to come back.
+     */
+    public synchronized long measuredCycleMs() {
+        return cycleEmaMs > 0 ? cycleEmaMs : fallbackCycleMs();
+    }
+
+    private long fallbackCycleMs() {
+        return Math.max(1, roster.size()) * (long) (skipMs + guardMs);
     }
 
     public synchronized void start() {
@@ -152,6 +172,8 @@ public final class RingMac {
         settled = roster.size() <= 1;   // alone: nothing to listen for
         settleDeadlineMs = now + SETTLE_FALLBACK_MS;
         advancesSeen = 0;
+        lastWrapMs = 0;
+        cycleEmaMs = 0;
         hooks.onStatus("Ring: started (" + roster.size() + " station"
                 + (roster.size() == 1 ? "" : "s") + ", guard " + guardMs
                 + " ms, skip " + skipMs + " ms)");
@@ -291,6 +313,15 @@ public final class RingMac {
         if (turnIdx >= roster.size()) {
             turnIdx = 0;
             applyRoster(now, false);      // roster changes only at cycle wrap
+            if (lastWrapMs > 0) {
+                long sample = now - lastWrapMs;
+                long cap = 10L * fallbackCycleMs();
+                if (sample > cap) sample = cap;   // ignore dormant gaps
+                cycleEmaMs = cycleEmaMs == 0
+                        ? sample
+                        : (7 * cycleEmaMs + 3 * sample) / 10;
+            }
+            lastWrapMs = now;
         }
         resetTurn(now);
         if (!settled) {

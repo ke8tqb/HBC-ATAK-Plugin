@@ -23,6 +23,10 @@ public final class MeshRouterTest {
         testFourNodeAnnounceTrace();
         testDirectForwardAndAck();
         testPassiveLearning();
+        testTxGatedRetry();
+        testStuckQueueFails();
+        testRetryPolicyHook();
+        testUnackedDirect();
         System.out.println(failures == 0
                 ? "\nAll MeshRouter tests PASSED"
                 : "\n" + failures + " MeshRouter test(s) FAILED");
@@ -85,6 +89,11 @@ public final class MeshRouterTest {
         final List<byte[]> txed = new ArrayList<>();
         final List<String> rxOrigins = new ArrayList<>();
         final List<byte[]> rxPayloads = new ArrayList<>();
+        final List<String> statuses = new ArrayList<>();
+        // true = frames "air" the instant they are handed over (CSMA-like,
+        // mirrors the plugin calling notifyTransmitted in sendFrameToModem);
+        // false = frames sit in a MAC queue until the test airs them.
+        boolean autoAir = true;
         Node(String call) {
             router = new MeshRouter(call, this);
             router.setAnnounceIntervalMin(0);   // no periodic announces in tests
@@ -92,9 +101,16 @@ public final class MeshRouterTest {
         public void onHbcPayload(String origin, byte[] hbc) {
             rxOrigins.add(origin); rxPayloads.add(hbc);
         }
-        public void transmitFrame(byte[] frame) { txed.add(frame); }
-        public void onStatus(String message) { /* quiet */ }
+        public void transmitFrame(byte[] frame) {
+            txed.add(frame);
+            if (autoAir) router.notifyTransmitted(frame);
+        }
+        public void onStatus(String message) { statuses.add(message); }
         byte[] lastTx() { return txed.isEmpty() ? null : txed.get(txed.size() - 1); }
+        boolean sawStatus(String frag) {
+            for (String s : statuses) if (s.contains(frag)) return true;
+            return false;
+        }
     }
 
     // Appendix B: A -(B,C)-> D. D must lock onto the first-heard path and
@@ -201,6 +217,89 @@ public final class MeshRouterTest {
                 d.router.routingTableSummary().contains("C1C via C1C (1 hop)"));
         check("relayed origin routable via transmitter",
                 d.router.routingTableSummary().contains("A1A via C1C (2 hops)"));
+    }
+
+    /** One-hop pair with routes learned in both directions. */
+    private static Node[] linkedPair() {
+        Node a = new Node("A1A"), b = new Node("B1B");
+        b.router.announceNow();
+        a.router.onRadioFrame(b.lastTx());
+        a.router.announceNow();
+        b.router.onRadioFrame(a.lastTx());
+        a.txed.clear(); b.txed.clear();
+        return new Node[]{a, b};
+    }
+
+    // v0.23: the retry clock must not run while the only copy is still
+    // waiting in a MAC queue (Ring). It arms when the copy airs.
+    private static void testTxGatedRetry() {
+        Node[] ab = linkedPair();
+        Node a = ab[0];
+        a.autoAir = false;                     // frames wait in a MAC queue
+        a.router.sendDirect("B1B", new byte[]{0x01});
+        check("queued direct handed over once", a.txed.size() == 1);
+        long t = System.currentTimeMillis();
+        a.router.tick(t + 30_000);
+        a.router.tick(t + 120_000);
+        check("no retry while never aired", a.txed.size() == 1);
+        check("no FAILED while queued < stuck limit", !a.sawStatus("FAILED"));
+        // the copy finally airs: retry clock starts HERE
+        a.router.notifyTransmitted(a.txed.get(0));
+        a.router.tick(System.currentTimeMillis() + 1_000);
+        check("no retry right after airing", a.txed.size() == 1);
+        a.router.tick(System.currentTimeMillis() + 8_000);
+        check("retry after aired + delay", a.txed.size() == 2);
+        check("gated retry reuses sequence ID",
+                a.txed.get(0)[11] == a.txed.get(1)[11]
+                && a.txed.get(0)[12] == a.txed.get(1)[12]);
+    }
+
+    // A direct whose copies never air at all must eventually fail (stuck
+    // queue safety) without ever retransmitting into the dead queue.
+    private static void testStuckQueueFails() {
+        Node[] ab = linkedPair();
+        Node a = ab[0];
+        a.autoAir = false;
+        a.router.sendDirect("B1B", new byte[]{0x02});
+        a.router.tick(System.currentTimeMillis() + 200_000);
+        check("stuck queued direct FAILED", a.sawStatus("FAILED"));
+        check("stuck direct never retransmitted", a.txed.size() == 1);
+    }
+
+    // The hosting MAC can stretch retry pacing (Ring: >= one rotation).
+    private static void testRetryPolicyHook() {
+        Node[] ab = linkedPair();
+        Node a = ab[0];
+        a.router.setRetryPolicy(tries -> 30_000L);
+        a.router.sendDirect("B1B", new byte[]{0x03});   // airs immediately
+        long t = System.currentTimeMillis();
+        a.router.tick(t + 10_000);
+        check("policy delay honored at 10 s", a.txed.size() == 1);
+        a.router.tick(t + 31_000);
+        check("policy retry after 30 s", a.txed.size() == 2);
+    }
+
+    // Unacked directs (chat receipts): same wire frame, no ARQ state.
+    private static void testUnackedDirect() {
+        Node[] ab = linkedPair();
+        Node a = ab[0], b = ab[1];
+        byte[] hbc = {0x55, 0x66};
+        a.router.sendDirectUnacked("B1B", hbc);
+        byte[] f = a.lastTx();
+        check("unacked direct sent", f != null
+                && (f[0] & 0xFF) == MeshRouter.TYPE_DIRECT);
+        check("unacked marked in status", a.sawStatus("unacked"));
+        b.router.onRadioFrame(f);
+        check("unacked direct delivered", b.rxPayloads.size() == 1
+                && Arrays.equals(b.rxPayloads.get(0), hbc));
+        byte[] ack = b.lastTx();
+        check("recipient still ACKs it", ack != null
+                && (ack[0] & 0xFF) == MeshRouter.TYPE_ACK);
+        int n = a.txed.size();
+        a.router.onRadioFrame(ack);             // origin ignores the ACK
+        a.router.tick(System.currentTimeMillis() + 300_000);
+        check("no retries and no FAILED for unacked",
+                a.txed.size() == n && !a.sawStatus("FAILED"));
     }
 
     private static void check(String name, boolean ok) {

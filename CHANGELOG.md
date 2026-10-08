@@ -4,6 +4,54 @@ All notable changes to HBC Audio Plugin are documented here.
 
 ---
 
+## [0.23] — Ring-aware ARQ: fix chat-storm TX queue buildup
+
+Field test (10-07, 3 stations, OFDM + Ring) showed heavy chat building
+~20-frame TX queues: the mesh ARQ's CSMA-era 5 s retry timer fired
+while the original Direct was still waiting for its ring turn, so every
+DM went to air up to 4×, 20 of 23 Directs were declared FAILED (only 3
+ACKs ever completed), and ATAK receipts amplified each chat into ~10+
+frames network-wide. No wire-format change — 0.22/0.23 interoperate.
+
+- **TX-gated retry clock (MeshRouter).** A pending Direct's
+  retry/failure timer no longer runs while its latest copy sits in the
+  ring queue — `notifyTransmitted()` arms it when the frame actually
+  reaches the modem (first copy and every retry copy). A pending whose
+  copies never air fails after 180 s (stuck-queue safety) instead of
+  retrying into the same queue.
+- **Rotation-scaled retry pacing.** New `MeshRouter.RetryPolicy` hook;
+  the plugin installs: Ring → `max(8 s, 1.25 × measured rotation)`
+  capped at 60 s (+0–2 s jitter), CSMA → unchanged 5–7 s. RingMac now
+  measures its rotation time (EMA of cycle-wrap intervals,
+  `measuredCycleMs()`).
+- **Unacked chat receipts.** Delivered/read receipts (Mode 0) now go
+  out via `sendDirectUnacked()` — same wire format, routed the same,
+  but no retries and no FAILED verdict; the recipient's mesh ACK is
+  simply ignored. A lost checkmark no longer costs 4 on-air copies.
+- **Stale-PLI replacement.** A queued self-PLI broadcast is removed
+  when a fresher one is enqueued (ring mode) — positions don't stack.
+- **Backlog warning.** `Ring: TX queue N frames (~X s to drain)` logs
+  (at most every 30 s) once more than 6 frames wait, with a drain
+  estimate from the measured rotation.
+- **Batching follows Max turn.** Frames-per-turn now derive from the
+  turn budget (`(Max turn − 500 ms) / per-frame burst`, 1–4): defaults
+  unchanged (AFSK 4 / OFDM 2 / Mercury 1), but raising Max turn on all
+  stations now drains queues faster instead of only lengthening the
+  deadline. The modem batch cap follows the same number.
+- **PLI auto-floor raised** to roster × 8 s (Mercury × 13 s) — keeps
+  PLIs at ~25% of rotation airtime; companion per-group-size
+  recommendation table exported with the 10-07 field logs.
+- **Docs.** ICD v1.5: §3.5 ARQ-interaction note + capacity update,
+  §4.9 rewritten (TX-gated clock, pacing, unacked receipts), §5.4,
+  §6.2/6.4 new rows, §7 timing rows, §8 compat bullet, ARQ glossary
+  entry; PDF regenerated. PROTOCOL.md: normative "ARQ interaction"
+  subsection + batching/floor updates. README updated.
+- **Tests.** MeshRouterTest: TX-gated retry, stuck-queue failure,
+  RetryPolicy override, unacked-direct delivery/no-retry; RingMacTest:
+  measured-cycle fallback + EMA. All four suites green.
+
+---
+
 ## [0.22] — Ring MAC: deterministic multi-user channel access + TX batching
 
 Channel-access rework for multi-user nets (up to ~20 stations) on VOX

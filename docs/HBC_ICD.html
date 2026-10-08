@@ -35,7 +35,7 @@
   <h1>HBC RADIO</h1>
   <div class="sub">ATAK Plugin &mdash; Interface Control Document</div>
   <div class="sub">Ham Binary CoT over Distance-Vector Mesh Radio</div>
-  <div class="contact">Version 1.4 &nbsp;|&nbsp; KE8TQB &nbsp;|&nbsp; github.com/ke8tqb/HBC-ATAK-Plugin</div>
+  <div class="contact">Version 1.5 &nbsp;|&nbsp; KE8TQB &nbsp;|&nbsp; github.com/ke8tqb/HBC-ATAK-Plugin</div>
 </div>
 
 <div class="toc">
@@ -235,9 +235,24 @@ long the carrier outlives the audio. Set Guard = the worst measured hang among a
 in the net + 150 ms. Every station must use the same Guard, Skip and modem.</div>
 <p><b>Capacity</b> (20 stations, 5 of them with traffic in a given cycle, defaults):
 AFSK &asymp; 32 s per full rotation, OFDM &asymp; 35 s, Mercury &asymp; 54 s. So that
-position reports always fit one rotation, Ring mode automatically floors the PLI interval
-at <code>roster &times; 6 s</code> (<code>&times; 10 s</code> on Mercury), even if the
-user&rsquo;s &ldquo;PLI min s&rdquo; is set lower.</p>
+position reports never dominate the rotation, Ring mode automatically floors the PLI
+interval at <code>roster &times; 8 s</code> (<code>&times; 13 s</code> on Mercury), even if
+the user&rsquo;s &ldquo;PLI min s&rdquo; is set lower &mdash; that keeps PLIs at roughly a
+quarter of each station&rsquo;s turn capacity, leaving the rest for chat, ACKs and relays
+(raised from &times; 6 s / &times; 10 s in 0.23 after field testing).</p>
+<div class="note"><b>ARQ interaction (plugin 0.23):</b> the mesh layer&rsquo;s delivery
+retries (section 4.9) are aware of the Ring MAC. A 3-station field test on 0.22 showed the
+CSMA-era 5 s retry timer firing while the original Direct was still waiting for its turn:
+every chat message went to air up to 4 times, 20 of 23 Directs were declared failed even
+though they arrived, and TX queues peaked at ~21 frames (~4 minutes of backlog). Since
+0.23: (1) a pending Direct&rsquo;s retry clock only starts once its latest copy actually
+<i>airs</i>; (2) under Ring the retry interval scales to at least 1.25&times; the measured
+rotation time (an ACK cannot physically return sooner than the recipient&rsquo;s own turn);
+(3) chat delivered/read receipts travel as unacknowledged Directs; (4) a queued position
+report is replaced in place when a fresher one arrives; and (5) a persistent backlog is
+called out in the Activity Log (<code>Ring: TX queue&hellip;</code>). Raising <b>Max
+turn</b> (identically on every station) now also raises how many frames fit in one batch,
+so operators can trade longer turns for faster queue drain.</div>
 <div class="note"><b>Design notes (why not the alternatives):</b> REQUEST/GRANT schemes,
 RTS/CTS and explicit token packets all cost full modem bursts per exchange &mdash; on OFDM
 every burst is ~1.84 s and on Mercury ~5.6 s regardless of payload size, so control
@@ -352,10 +367,24 @@ duplicate Direct addressed <i>to this station</i> gets a fresh ACK (but is not d
 twice) &mdash; that covers the case where the first ACK was lost on the air.</p>
 
 <h3>4.9 Reliability and Retries</h3>
-<p>Directs work &ldquo;fire and wait&rdquo;: after sending, the originator waits 5 s (plus a
-random 0&ndash;2 s) for the ACK. No ACK &rarr; send it again <b>with the same Sequence
-ID</b>, up to 3 retries, then declare it failed and log it. Broadcasts are never acknowledged
-or retried.</p>
+<p>Directs work &ldquo;fire and wait&rdquo;: the originator keeps the message until the
+destination&rsquo;s ACK arrives, re-sending it <b>with the same Sequence ID</b> up to
+3 times, then declaring it failed and logging it. Broadcasts are never acknowledged or
+retried. Two refinements (plugin 0.23) let this ARQ coexist with the Ring MAC:</p>
+<ul>
+  <li><b>The retry clock starts when the frame airs, not when it is queued.</b> Under the
+      Ring MAC a frame can wait many seconds for this station&rsquo;s turn; retrying while
+      the original is still queued only duplicates it in the same queue. A pending whose
+      copies never reach the air at all is failed after 3 minutes (stuck-queue safety).</li>
+  <li><b>Retry pacing follows the channel-access mode.</b> CSMA: 5 s + 0&ndash;2 s random
+      jitter (the original behavior). Ring: at least 1.25&times; the measured rotation time
+      (minimum 8 s, capped at 60 s) &mdash; an ACK cannot return before the recipient&rsquo;s
+      own turn comes around, so earlier retries are pure overhead.</li>
+</ul>
+<p>Chat delivered/read receipts (section 5.4) are sent as <b>unacknowledged Directs</b>
+(0.23): identical on the wire, but with no retries and no failure verdict &mdash; a lost
+checkmark does not justify retry traffic. The recipient still answers with a mesh ACK,
+which the origin simply ignores.</p>
 
 <div class="pagebreak"></div>
 <h2>5. Application Layer (HBC Protocol v1.6)</h2>
@@ -408,7 +437,8 @@ recipient&rsquo;s ATAK automatically generates its delivered/read receipts, the 
 converts them into tiny Mode 0 Acks that echo the tag back over the air; the sender matches
 the tag to the original messageId and injects the receipt, so ATAK&rsquo;s familiar
 delivered/read checkmarks work end-to-end over radio. These application-level receipts are
-separate from (and in addition to) the mesh-layer ACKs of section 4.6.</p>
+separate from (and in addition to) the mesh-layer ACKs of section 4.6. Since 0.23 they are
+carried as unacknowledged Directs (section 4.9) &mdash; best-effort by design.</p>
 
 <h3>5.5 Contact Publication</h3>
 <p>ATAK only lists a station in its chat/contact pickers when that station&rsquo;s position
@@ -501,7 +531,7 @@ update.</div>
   <tr><td>TX audio stream</td><td>Dropdown</td><td>Which Android audio channel carries the transmit tones (Figure 3). Default Alarm; try the others only if your device distorts the tones.</td></tr>
   <tr><td>Channel access</td><td>Dropdown</td><td>CSMA (legacy contention, section 3.4) or Ring (deterministic turns, section 3.5). Must match on every station.</td></tr>
   <tr><td>&#9432; UV-5R / FT-65 defaults</td><td>Help link</td><td>Opens a dialog with the recommended Ring/VOX values for the reference radios, why their VOX hang cannot be shortened, the Guard calibration procedure, and hardwired-PTT alternatives (section 3.5).</td></tr>
-  <tr><td>Guard ms / Skip ms / Max turn ms</td><td>Number fields</td><td>Ring MAC timing (section 3.5): Guard covers the radios&rsquo; VOX hang (default 1500), Skip covers VOX attack before skipping a silent station (default 1200), Max turn caps one batch (0 = automatic per modem). Same values on every station.</td></tr>
+  <tr><td>Guard ms / Skip ms / Max turn ms</td><td>Number fields</td><td>Ring MAC timing (section 3.5): Guard covers the radios&rsquo; VOX hang (default 1500), Skip covers VOX attack before skipping a silent station (default 1200), Max turn caps one batch (0 = automatic per modem). Same values on every station. Since 0.23 a larger Max turn also fits more frames into each batch (faster queue drain at the cost of longer turns).</td></tr>
   <tr><td>Transmit / Receive</td><td>Checkboxes</td><td>Master switches. Unchecking Transmit makes the station receive-only; unchecking Receive ignores all incoming audio.</td></tr>
   <tr><td>PLI, Spots, Alerts, Chat, Shapes, CASEVAC</td><td>Checkboxes</td><td>Per-type transmit filters, matching the HBC modes of section 5.2. An unchecked type is never transmitted (receiving is unaffected).</td></tr>
   <tr><td>Start / Stop Radio Link</td><td>Button (header, always visible)</td><td>Validates and saves the settings, then starts (or stops) the selected modem and the mesh layer. The label flips to match the current state.</td></tr>
@@ -546,6 +576,7 @@ runtime) and what each one means.</p>
   <tr><td class="mono">Ring: roster now {n} stations ({list})</td><td>The rotation list changed at a cycle wrap (station joined or expired).</td></tr>
   <tr><td class="mono">Ring: {call} dormant (3 silent turns)</td><td>That station has not transmitted for 3 cycles; it keeps costing only the Skip time.</td></tr>
   <tr><td class="mono">Ring: emergency frame queued &mdash; preempting at next idle window / Ring: emergency TX ({x} frames, preempt)</td><td>A 911 alert jumped the turn order in an idle gap (the single allowed exception).</td></tr>
+  <tr><td class="mono">Ring: TX queue {n} frames (~{t} s to drain)</td><td>More than 6 frames are waiting for this station&rsquo;s turns (estimate from the measured rotation time; logged at most every 30 s). If it persists, slow down chat/marker sends &mdash; see section 3.5&rsquo;s ARQ-interaction note.</td></tr>
 </table>
 <p><b>Transmit decisions:</b></p>
 <table>
@@ -564,9 +595,10 @@ runtime) and what each one means.</p>
   <tr><td class="mono">Mesh: route {call} via {call2} ({n} hops)</td><td>Address-book update: {call} is now reachable by handing frames to {call2}. A trailing <code>[heard]</code> means it was learned passively just by hearing traffic (section 4.7). The Send-to list refreshes.</td></tr>
   <tr><td class="mono">Mesh: announce sent (seq {n})</td><td>The 10-minute quiet-time keepalive announce went out.</td></tr>
   <tr><td class="mono">Mesh: direct to {call} via {call2} (seq {n})</td><td>A routed Direct left this station; an ACK is now awaited.</td></tr>
+  <tr><td class="mono">Mesh: direct to {call} via {call2} (seq {n}, unacked)</td><td>A fire-and-forget Direct (chat delivered/read receipt): no retries, no failure verdict (section 4.9).</td></tr>
   <tr><td class="mono">Mesh: {call} acknowledged seq {n}</td><td>Delivery confirmed &mdash; the destination&rsquo;s ACK arrived.</td></tr>
-  <tr><td class="mono">Mesh: retry {i}/3 to {call} via {call2}</td><td>No ACK yet; the Direct was re-sent (same sequence ID).</td></tr>
-  <tr><td class="mono">Mesh: direct to {call} FAILED (no ack after 3 retries)</td><td>Delivery gave up. The station is likely out of range or off.</td></tr>
+  <tr><td class="mono">Mesh: retry {i}/3 to {call} via {call2}</td><td>No ACK yet; the Direct was re-sent (same sequence ID). Since 0.23 this fires only after the previous copy actually aired &mdash; under Ring, at least ~1.25 rotations later.</td></tr>
+  <tr><td class="mono">Mesh: direct to {call} FAILED (no ack after 3 retries)</td><td>Delivery gave up. The station is likely out of range or off. Also issued when queued copies could not reach the air for 3 minutes (stuck queue).</td></tr>
   <tr><td class="mono">Mesh: no route to {call} &mdash; sending as broadcast</td><td>No address-book entry for the destination, so the message went out unrouted; the station will still get it if in direct range.</td></tr>
   <tr><td class="mono">Mesh: forwarding {call} -&gt; {call2} via {call3}</td><td>This station is acting as a relay for someone else&rsquo;s Direct.</td></tr>
   <tr><td class="mono">Mesh: no route to {call} &mdash; direct dropped</td><td>Asked to relay a Direct but no route to the destination is known.</td></tr>
@@ -609,7 +641,7 @@ answers &ldquo;what have I actually received?&rdquo;</div>
   <tr><td>Route entry TTL</td><td>30 min (refreshed by any heard frame)</td><td>Mesh</td></tr>
   <tr><td>Duplicate cache TTL</td><td>5 min</td><td>Mesh</td></tr>
   <tr><td>Cleanup interval</td><td>60 s</td><td>Mesh</td></tr>
-  <tr><td>Direct retry timer</td><td>5 s + 0&ndash;2 s jitter, max 3 retries</td><td>Mesh</td></tr>
+  <tr><td>Direct retry timer</td><td>Armed when the frame airs (0.23). CSMA: 5 s + 0&ndash;2 s jitter; Ring: max(8 s, 1.25 &times; measured rotation), cap 60 s. Max 3 retries; stuck-queue fail 180 s</td><td>Mesh</td></tr>
   <tr><td>Quiet-time announce keepalive</td><td>10 min without own traffic</td><td>Mesh</td></tr>
   <tr><td>CSMA busy threshold / hold</td><td>4&times; adaptive noise floor / 400 ms</td><td>PHY</td></tr>
   <tr><td>CSMA backoff / give-up</td><td>150&ndash;550 ms clear / 8 s (15 s Mercury)</td><td>PHY</td></tr>
@@ -617,8 +649,8 @@ answers &ldquo;what have I actually received?&rdquo;</div>
   <tr><td>Ring Skip (silent-station timeout)</td><td>User setting, default 1200 ms</td><td>MAC</td></tr>
   <tr><td>Ring Max turn</td><td>Auto per modem: AFSK 6000 / OFDM 4400 / Mercury 6000 ms (user-overridable)</td><td>MAC</td></tr>
   <tr><td>Ring settle (join listening)</td><td>1 observed cycle, max 30 s</td><td>MAC</td></tr>
-  <tr><td>Ring batch caps</td><td>AFSK 4 / OFDM 2 / Mercury 1 frames per keying (also applies under CSMA)</td><td>MAC/PHY</td></tr>
-  <tr><td>PLI rate limit</td><td>User setting, default 60 s (Figure 2); Ring mode floors it at roster &times; 6 s (&times; 10 s Mercury)</td><td>Application</td></tr>
+  <tr><td>Ring batch caps</td><td>Derived from Max turn (0.23); at the automatic defaults: AFSK 4 / OFDM 2 / Mercury 1 frames per keying (also applies under CSMA)</td><td>MAC/PHY</td></tr>
+  <tr><td>PLI rate limit</td><td>User setting, default 60 s (Figure 2); Ring mode floors it at roster &times; 8 s (&times; 13 s Mercury, raised in 0.23)</td><td>Application</td></tr>
   <tr><td>RX duplicate window (frame hash)</td><td>30 s</td><td>Plugin</td></tr>
 </table>
 
@@ -632,6 +664,10 @@ answers &ldquo;what have I actually received?&rdquo;</div>
       Guard/Skip values; a CSMA station mixed into a Ring net simply contends as before and
       the Ring stations defer to its carrier (the net degrades toward polite CSMA, never
       below it).</li>
+  <li>The 0.23 ARQ changes (TX-gated, rotation-scaled retries; unacknowledged receipts;
+      PLI floor &times; 8 s) are likewise behavioral only &mdash; wire-identical with 0.22.
+      In a mixed net, 0.22-and-earlier stations simply keep their old 5 s retry behavior
+      (and its queue growth) while 0.23 stations do not.</li>
   <li>Mercury DATAC4&rsquo;s small frame limits routed Directs to ~29 bytes of HBC payload
       (Broadcasts ~39 B). Every standard message fits; unusually large Mode 6 markers may
       need Broadcast or a different modem.</li>
@@ -651,7 +687,8 @@ answers &ldquo;what have I actually received?&rdquo;</div>
   <tr><td>Payload</td><td>The useful data inside a packet, after the addressing header</td></tr>
   <tr><td>Hop</td><td>One radio link in a relay chain (A&rarr;B is one hop; A&rarr;B&rarr;C is two)</td></tr>
   <tr><td>Route / next hop</td><td>Address-book entry: which neighbor to hand a message to so it reaches a destination</td></tr>
-  <tr><td>ACK</td><td>Acknowledgment — a short &ldquo;received OK&rdquo; reply</td></tr>
+  <tr><td>ACK</td><td>Acknowledgment &mdash; a short &ldquo;received OK&rdquo; reply</td></tr>
+  <tr><td>ARQ</td><td>Automatic Repeat reQuest &mdash; send, await the ACK, re-send on timeout (section 4.9)</td></tr>
   <tr><td>CSMA</td><td>Carrier Sense Multiple Access &mdash; listen before transmitting to avoid collisions</td></tr>
   <tr><td>MAC</td><td>Medium Access Control &mdash; the rules deciding when a station may transmit (CSMA or Ring here)</td></tr>
   <tr><td>Ring MAC / turn</td><td>The 0.22 channel-access mode: stations rotate through the sorted roster; a turn is one station&rsquo;s transmit window</td></tr>

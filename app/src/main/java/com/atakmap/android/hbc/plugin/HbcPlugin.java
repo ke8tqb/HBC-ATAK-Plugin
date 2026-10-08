@@ -84,6 +84,14 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
     // under CSMA frames go straight to the modem queue as before)
     private final java.util.ArrayDeque<byte[]> ringPending = new java.util.ArrayDeque<>();
 
+    // v0.23 ring-queue hygiene: flag set just before a self-PLI broadcast
+    // reaches txFrame (same call stack) so the queue can replace the
+    // previous, now-stale queued PLI; plus rate-limited backlog warnings.
+    private volatile boolean pliBroadcastNext = false;
+    private byte[] lastQueuedPli;             // guarded by ringPending
+    private volatile long lastQueueWarnMs = 0;
+    private volatile int ringFramesPerTurn = 1;
+
     // UI
     private EditText etCallsign, etDwell, etVoxLeader, etPliRate, etAfskLevel;
     private EditText etRingGuard, etRingSkip, etRingMaxTurn;
@@ -676,22 +684,53 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
             // acts as the announce via passive route learning; a real mesh
             // announce only goes out as a keepalive after 10 quiet minutes.
             mesh.setAnnounceIntervalMin(10);
+            // v0.23: ARQ pacing must match the MAC. Under the Ring MAC a
+            // retry is pointless until at least one full rotation has
+            // passed (the ACK needs the recipient's own turn to travel
+            // back); under CSMA the classic 5 s + jitter stays.
+            mesh.setRetryPolicy(tries -> {
+                RingMac rm = ringMac;
+                if (rm != null) {
+                    long cycle = rm.measuredCycleMs();
+                    long d = Math.max(8_000L, cycle + cycle / 4);
+                    return Math.min(60_000L, d)
+                            + (long) (Math.random() * 2000);
+                }
+                return 5_000L + (long) (Math.random() * 2000);
+            });
             mesh.start();
 
             // Ring MAC: deterministic rotation replaces CSMA contention
             if (ringMode) {
-                synchronized (ringPending) { ringPending.clear(); }
+                synchronized (ringPending) {
+                    ringPending.clear();
+                    lastQueuedPli = null;
+                }
                 ringMac = new RingMac(prefs.getString("callsign", ""), ringHooks());
                 ringMac.setGuardMs(ringGuard);
                 ringMac.setSkipMs(ringSkip);
-                int autoTurn, framesPerTurn;
+                int autoTurn, perFrameMs;
                 switch (modemType()) {
-                    case 1:  autoTurn = 4400; framesPerTurn = 2; break;
-                    case 2:  autoTurn = 6000; framesPerTurn = 1; break;
-                    default: autoTurn = 6000; framesPerTurn = 4; break;
+                    case 1:  autoTurn = 4400; perFrameMs = 1700; break;
+                    case 2:  autoTurn = 6000; perFrameMs = 6000; break;
+                    default: autoTurn = 6000; perFrameMs = 1100; break;
                 }
-                ringMac.setMaxTurnMs(ringMaxTurn > 0 ? ringMaxTurn : autoTurn);
+                int effTurn = ringMaxTurn > 0 ? ringMaxTurn : autoTurn;
+                // v0.23: frames per turn derive from the turn budget, so
+                // raising Max turn (identically on all stations) buys more
+                // batching instead of just a longer deadline. Defaults are
+                // unchanged: OFDM 2, Mercury 1, AFSK 4.
+                int framesPerTurn = Math.max(1, Math.min(4,
+                        (effTurn - 500) / perFrameMs));
+                ringMac.setMaxTurnMs(effTurn);
                 ringMac.setMaxFramesPerTurn(framesPerTurn);
+                ringFramesPerTurn = framesPerTurn;
+                // keep the modem's burst batching aligned with the turn
+                if (ofdm != null) ofdm.setMaxBatchFrames(framesPerTurn);
+                else if (mercury != null) mercury.setMaxBatchFrames(framesPerTurn);
+                else if (modem != null) modem.setMaxBatchFrames(framesPerTurn);
+                sessionDebug("Ring: maxTurn=" + effTurn + " ms, framesPerTurn="
+                        + framesPerTurn);
                 ringMac.start();
             }
 
@@ -711,7 +750,10 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
                 CommsMapComponent.getInstance().registerPreSendProcessor(null);
             } catch (Exception ignored) {}
             if (ringMac != null) { ringMac.stop(); ringMac = null; }
-            synchronized (ringPending) { ringPending.clear(); }
+            synchronized (ringPending) {
+                ringPending.clear();
+                lastQueuedPli = null;
+            }
             if (mesh != null)    { mesh.stop();    mesh = null; }
             if (modem != null)   { modem.stop();   modem = null; }
             if (ofdm != null)    { ofdm.stop();    ofdm = null; }
@@ -730,16 +772,53 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
     private void txFrame(byte[] frame) {
         try {
             sessionDebug("TX mesh frame " + frame.length + " B: " + hex(frame));
+            boolean isPli = pliBroadcastNext;
+            pliBroadcastNext = false;
             if (ringMac != null) {
+                boolean replaced = false;
+                int depth;
                 synchronized (ringPending) {
+                    if (isPli) {
+                        // a queued position is stale the moment a fresh one
+                        // exists — never let PLIs stack up in the queue
+                        if (lastQueuedPli != null
+                                && ringPending.remove(lastQueuedPli))
+                            replaced = true;
+                        lastQueuedPli = frame;
+                    }
                     ringPending.addLast(frame);
+                    depth = ringPending.size();
                 }
+                if (replaced)
+                    sessionDebug("Ring: replaced stale queued PLI");
+                maybeWarnBacklog(depth);
                 return;
             }
             sendFrameToModem(frame);
         } catch (Exception e) {
             log("TX error: " + e);
         }
+    }
+
+    /**
+     * Rate-limited visibility into ring-queue congestion: one LOG line at
+     * most every 30 s once more than 6 frames are waiting, with a drain
+     * estimate from the measured rotation time (v0.23).
+     */
+    private void maybeWarnBacklog(int depth) {
+        if (depth <= 6) return;
+        long now = System.currentTimeMillis();
+        if (now - lastQueueWarnMs < 30_000) return;
+        lastQueueWarnMs = now;
+        RingMac rm = ringMac;
+        long drainS = 0;
+        if (rm != null) {
+            int perTurn = Math.max(1, ringFramesPerTurn);
+            long turns = (depth + perTurn - 1) / perTurn;
+            drainS = turns * rm.measuredCycleMs() / 1000;
+        }
+        log("Ring: TX queue " + depth + " frames"
+                + (drainS > 0 ? " (~" + drainS + " s to drain)" : ""));
     }
 
     /** Push one mesh frame into whichever modem is active (dumb byte pipe). */
@@ -751,6 +830,11 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
             mercury.transmit(myCall, frame);
         else if (modem != null)
             modem.transmit(DEFAULT_DEST, myCall, new String[0], frame);
+        // v0.23: the frame has left for the modem — arm the mesh ARQ's
+        // retry clock now (it must never run while a Direct is still
+        // waiting in the ring queue).
+        MeshRouter ms = mesh;
+        if (ms != null) ms.notifyTransmitted(frame);
     }
 
     /** RingMac's window into the plugin: channel state, roster, TX queue. */
@@ -907,8 +991,11 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
                     HbcEncoder.Encoded ack = HbcEncoder.encodeAck(
                             prefs.getString("callsign", ""),
                             pa.senderCallsign, kind, pa.tag);
-                    // route the chat receipt straight back to the DM sender
-                    mesh.sendDirect(meshDestFor(pa.senderCallsign), ack.bytes);
+                    // Route the chat receipt back to the DM sender WITHOUT
+                    // ARQ (v0.23): a lost checkmark is tolerable, while
+                    // retry-storming every delivered/read receipt was a
+                    // major source of ring-queue buildup.
+                    mesh.sendDirectUnacked(meshDestFor(pa.senderCallsign), ack.bytes);
                     log("Queued TX mode 0 ack (" + type + ") -> "
                             + pa.senderCallsign + " tag 0x"
                             + String.format("%04X", pa.tag));
@@ -943,13 +1030,15 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
 
             // PLI rate limit — applies ONLY to the station's own position
             // reports, never to placed markers. Under the Ring MAC the
-            // interval is floored by roster size so 20 stations' PLIs
-            // always fit one rotation (6 s/station; 10 s on Mercury).
+            // interval is floored by roster size so N stations' PLIs use
+            // at most ~25% of the rotation's airtime and chat/ACK traffic
+            // keeps room to drain (v0.23: 8 s/station; 13 s on Mercury —
+            // see the PLI recommendation table in the docs).
             if (selfPli) {
                 long minInterval = prefs.getInt("pli_rate_s", 60) * 1000L;
                 RingMac rm = ringMac;
                 if (rm != null) {
-                    long perStation = modemType() == 2 ? 10_000L : 6_000L;
+                    long perStation = modemType() == 2 ? 13_000L : 8_000L;
                     long floor = rm.rosterSize() * perStation;
                     if (floor > minInterval) {
                         minInterval = floor;
@@ -987,8 +1076,12 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
                 String sendTo = prefs.getString("send_to", "");
                 if (!sendTo.isEmpty())
                     mesh.sendDirect(sendTo, enc.bytes);
-                else
+                else {
+                    // tag the frame about to reach txFrame (same call
+                    // stack) so the ring queue can replace a stale PLI
+                    pliBroadcastNext = selfPli;
                     mesh.sendBroadcast(enc.bytes);
+                }
             }
             log("Queued TX mode " + enc.mode + " (" + enc.bytes.length + " B) " + type);
 

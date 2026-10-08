@@ -74,9 +74,20 @@ the air changes — so mixed versions interoperate.
   ("Channel Access") and ICD §3.5.
 
 In both modes the TX path **batches** queued frames into one continuous
-keying (AFSK 4 / OFDM 2 / Mercury 1 frames per burst), so the radio's
-VOX key-up/hang cycle is paid once per talk burst instead of once per
-frame.
+keying (AFSK 4 / OFDM 2 / Mercury 1 frames per burst at the automatic
+defaults; since v0.23 a raised Max turn fits proportionally more frames
+per batch), so the radio's VOX key-up/hang cycle is paid once per talk
+burst instead of once per frame.
+
+v0.23 also makes the mesh delivery retries **Ring-aware** after field
+testing showed the CSMA-era 5 s retry timer flooding the turn queue: a
+Direct's retry clock now starts only when the frame actually airs,
+retries wait at least ~1.25 ring rotations, chat delivered/read
+receipts fly as fire-and-forget (unacked) Directs, a queued position
+report is replaced when a fresher one arrives, and a `Ring: TX queue
+N frames` warning appears if a backlog builds. The in-app PLI interval
+floor rose to roster × 8 s (Mercury × 13 s); see ICD §3.5/§4.9 for the
+numbers behind both.
 
 ## Mesh networking
 

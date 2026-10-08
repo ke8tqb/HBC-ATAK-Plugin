@@ -334,11 +334,15 @@ adjustable). Rules (normative):
    an inter-turn idle window after a 0–300 ms random offset. No other
    traffic may preempt.
 7. **Batching.** During its turn a station SHOULD send all queued
-   frames as ONE continuous keying, up to its per-modem cap (AFSK 4 /
-   OFDM 2 / Mercury 1 frames). On AFSK the first frame carries the
-   full flag preamble (≥300 ms); continuation frames carry a short
-   ~20 ms flag run — the receiving demodulator stays bit-synced across
-   the burst. OFDM/Mercury bursts concatenate with 100 ms gaps.
+   frames as ONE continuous keying, up to its per-turn cap. Since
+   v0.23 the cap derives from the turn budget —
+   `clamp(floor((MAX_TURN − 500 ms) / per-frame burst), 1, 4)` — which
+   yields AFSK 4 / OFDM 2 / Mercury 1 frames at the automatic
+   defaults; raising MAX_TURN identically on every station raises the
+   cap. On AFSK the first frame carries the full flag preamble
+   (≥300 ms); continuation frames carry a short ~20 ms flag run — the
+   receiving demodulator stays bit-synced across the burst.
+   OFDM/Mercury bursts concatenate with 100 ms gaps.
 
 Parameters (defaults; calibrate `GUARD` as worst measured VOX hang +
 150 ms using the session log's inter-burst timing):
@@ -349,10 +353,37 @@ Parameters (defaults; calibrate `GUARD` as worst measured VOX hang +
 | SKIP      | 1200 ms | VOX attack (~250 ms) + carrier-detect latency |
 | MAX_TURN  | auto: AFSK 6000 / OFDM 4400 / Mercury 6000 ms | longest batch |
 | Settle    | 1 cycle (max 30 s) | join listening period |
-| PLI floor | roster × 6 s (Mercury × 10 s) | PLI load ≤ one rotation |
+| PLI floor | roster × 8 s (Mercury × 13 s) — raised from × 6 / × 10 in v0.23 | PLIs ≤ ~25% of rotation airtime |
 
 Capacity (20 stations, 5 with traffic per cycle): AFSK ≈ 32 s, OFDM ≈
 35 s, Mercury ≈ 54 s per rotation.
+
+### ARQ interaction (v0.23, normative)
+
+The mesh layer's Direct-message ARQ MUST account for MAC queueing,
+otherwise retries multiply inside the TX queue (observed on 0.22: a
+3-station net turned every chat DM into 4 on-air copies, declared 20 of
+23 Directs failed, and built ~21-frame backlogs):
+
+1. **TX-gated retry clock.** The retry/failure timer for a pending
+   Direct MUST NOT run while its latest copy is still waiting in the
+   MAC queue; it is armed when the copy actually airs. A pending whose
+   copies never air is failed after 180 s (stuck-queue safety).
+2. **Rotation-scaled pacing.** Under Ring, the retry delay MUST be at
+   least one full rotation — implementation: `max(8 s, 1.25 × measured
+   rotation)`, capped at 60 s, plus 0–2 s jitter. Under CSMA the
+   legacy 5 s + jitter applies. (An ACK cannot return before the
+   recipient's own turn.)
+3. **Unacknowledged receipts.** Chat delivered/read receipts (Mode 0)
+   SHOULD be sent as Directs WITHOUT retry state — identical wire
+   format, no retries, no failure verdict. The recipient still
+   mesh-ACKs; the origin ignores it.
+4. **Queue hygiene.** A queued self-PLI SHOULD be replaced in place
+   when a fresher one is generated (positions go stale; two queued
+   positions for one station waste a turn).
+
+All four rules are behavioral only — wire-identical with 0.22; mixed
+nets simply leave old stations with the old retry behavior.
 
 ---
 

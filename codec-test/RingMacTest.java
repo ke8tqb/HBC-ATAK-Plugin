@@ -197,6 +197,22 @@ public class RingMacTest {
         check("T8 dormant logged", sawStatus("BRAVO dormant"));
         rm.stop();
 
+        // ---- T9: measured rotation time (v0.23) ----------------------
+        reset();
+        meshRoster.add("BRAVO");
+        rm = fresh("ALPHA");                   // roster ALPHA BRAVO
+        check("T9 fallback before first wrap",
+                rm.measuredCycleMs() == 2 * (1200 + 1500));
+        step(rm, 8000);                        // own-turn deadline (unsettled)
+        step(rm, 1300);                        // BRAVO skip -> first wrap
+        for (int i = 0; i < 4; i++) {
+            step(rm, 100);                     // own empty turn passes
+            step(rm, 1300);                    // BRAVO silent skip -> wrap
+        }
+        long cycle = rm.measuredCycleMs();     // steady cycle ~1.3-1.5 s
+        check("T9 measured cycle in range", cycle >= 1000 && cycle <= 3000);
+        rm.stop();
+
         System.out.println(failures == 0
                 ? "All RingMac tests PASSED"
                 : failures + " RingMac test(s) FAILED");

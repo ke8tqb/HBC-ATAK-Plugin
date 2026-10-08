@@ -44,10 +44,16 @@ import java.util.TreeMap;
  *  - Direct messages are routed hop-by-hop: a node whose callsign matches
  *    the Next Hop field rewrites next-hop/transmitter and re-transmits.
  *    The final destination replies with an ACK routed back to the origin.
- *  - The sender retries an unacknowledged Direct with the SAME sequence ID
- *    after 5 s + random jitter, up to 3 retries. Because retries reuse the
- *    seq, the destination re-ACKs (without re-delivering) when it sees a
- *    cached [origin+seq] Direct addressed to it — covering a lost ACK.
+ *  - The sender retries an unacknowledged Direct with the SAME sequence ID,
+ *    up to 3 retries. Because retries reuse the seq, the destination
+ *    re-ACKs (without re-delivering) when it sees a cached [origin+seq]
+ *    Direct addressed to it — covering a lost ACK.
+ *  - v0.23: the retry clock only starts once a copy actually AIRS
+ *    (notifyTransmitted) — under a queueing MAC (Ring) a frame can wait
+ *    many seconds for its turn, and retrying a frame that never
+ *    transmitted just duplicates it in the queue. Retry pacing is
+ *    pluggable (RetryPolicy) so the hosting MAC can scale it to its
+ *    rotation time; the default stays 5 s + jitter (CSMA behavior).
  */
 public final class MeshRouter {
 
@@ -65,6 +71,9 @@ public final class MeshRouter {
     private static final long RETRY_BASE_MS  = 5000L;
     private static final long RETRY_JITTER_MS = 2000L;
     private static final int  MAX_RETRIES    = 3;
+    // A pending whose latest copy never airs (stuck MAC queue) is failed
+    // outright after this long instead of retrying into the same queue.
+    private static final long STUCK_FAIL_MS  = 180_000L;
 
     public interface Callbacks {
         /** A Broadcast/Direct payload for this station (HBC binary). */
@@ -80,12 +89,24 @@ public final class MeshRouter {
         default void onHeardTransmitter(String transmitter) {}
     }
 
+    /**
+     * Pluggable retry pacing (v0.23): delay from an AIRED, still
+     * unacknowledged Direct to its next retry attempt. Under the Ring MAC
+     * the plugin scales this to the measured rotation time — the fixed
+     * CSMA-era 5 s fires long before a turn-based ACK can possibly return.
+     */
+    public interface RetryPolicy {
+        long retryDelayMs(int tries);
+    }
+
     private static final class Route {
         String nextHop; int hops; long lastSeen;
     }
 
     private static final class Pending {
         String dest; byte[] hbc; int seq; int tries; long nextAttemptMs;
+        boolean aired;      // latest copy actually left the modem
+        long queuedAtMs;    // when the latest copy entered the TX path
     }
 
     private final String myCall;
@@ -97,6 +118,7 @@ public final class MeshRouter {
     private final Map<Integer, Pending> pendingDirects = new HashMap<>();
 
     private int seqCounter;
+    private volatile RetryPolicy retryPolicy = null;   // null = 5 s default
     private volatile long announceIntervalMs = 10 * 60 * 1000L;
     private volatile boolean running = false;
     private Thread timerThread;
@@ -112,6 +134,21 @@ public final class MeshRouter {
     /** minutes between periodic announces; 0 disables periodic announces. */
     public void setAnnounceIntervalMin(int minutes) {
         announceIntervalMs = Math.max(0, minutes) * 60_000L;
+    }
+
+    /** Install MAC-aware retry pacing; null restores the 5 s default. */
+    public void setRetryPolicy(RetryPolicy policy) {
+        retryPolicy = policy;
+    }
+
+    private long retryDelay(int tries) {
+        RetryPolicy rp = retryPolicy;
+        if (rp != null) {
+            try {
+                return Math.max(1000L, rp.retryDelayMs(tries));
+            } catch (Exception ignored) {}
+        }
+        return RETRY_BASE_MS + (long) random.nextInt((int) RETRY_JITTER_MS);
     }
 
     public synchronized void start() {
@@ -182,13 +219,70 @@ public final class MeshRouter {
         deferAnnounce();
         Pending p = new Pending();
         p.dest = dest; p.hbc = hbc; p.seq = seq; p.tries = 0;
-        p.nextAttemptMs = now() + RETRY_BASE_MS + (long) random.nextInt((int) RETRY_JITTER_MS);
+        p.aired = false;
+        p.queuedAtMs = now();
+        p.nextAttemptMs = Long.MAX_VALUE;   // armed by notifyTransmitted()
         synchronized (routes) {
             pendingDirects.put(seq, p);
         }
         cb.onStatus("Mesh: direct to " + dest + " via " + nextHop
                 + " (seq " + String.format("%04X", seq) + ")");
         cb.transmitFrame(buildDirect(myCall, myCall, seq, dest, nextHop, hbc));
+    }
+
+    /**
+     * Send a routed Direct WITHOUT delivery tracking (v0.23): no pending
+     * entry, no retries, no FAILED verdict. Used for traffic whose loss
+     * is tolerable — chat delivered/read receipts — where the full ARQ
+     * treatment turned every receipt into its own retry storm under the
+     * Ring MAC. Wire format is unchanged: the recipient still mesh-ACKs,
+     * and the origin simply has no pending entry to match.
+     */
+    public void sendDirectUnacked(String destCallsign, byte[] hbc) {
+        String dest = destCallsign.toUpperCase();
+        String nextHop;
+        synchronized (routes) {
+            Route r = routes.get(dest);
+            nextHop = r == null ? null : r.nextHop;
+        }
+        if (nextHop == null) {
+            cb.onStatus("Mesh: no route to " + dest + " \u2014 sending as broadcast");
+            sendBroadcast(hbc);
+            return;
+        }
+        int seq = nextSeq();
+        deferAnnounce();
+        cb.onStatus("Mesh: direct to " + dest + " via " + nextHop
+                + " (seq " + String.format("%04X", seq) + ", unacked)");
+        cb.transmitFrame(buildDirect(myCall, myCall, seq, dest, nextHop, hbc));
+    }
+
+    /**
+     * The hosting layer reports that a frame has actually left the modem.
+     * Under the Ring MAC a frame can sit in the turn queue long after
+     * transmitFrame(), so the retry clock for a pending Direct is armed
+     * HERE — for the first copy and for every retry copy alike. Matches
+     * own-origin Direct frames and the broadcast fallback copies a retry
+     * can produce (same sequence ID).
+     */
+    public void notifyTransmitted(byte[] frame) {
+        if (frame == null || frame.length < HEADER_LEN) return;
+        int type = frame[0] & 0xFF;
+        if (type != TYPE_DIRECT && type != TYPE_BROADCAST) return;
+        String origin;
+        try {
+            origin = unpackCallsign(frame, 1);
+        } catch (Exception e) {
+            return;
+        }
+        if (!origin.equalsIgnoreCase(myCall)) return;
+        int seq = ((frame[11] & 0xFF) << 8) | (frame[12] & 0xFF);
+        synchronized (routes) {
+            Pending p = pendingDirects.get(seq);
+            if (p == null || p.aired) return;
+            p.aired = true;
+            p.nextAttemptMs = now() + retryDelay(p.tries);
+        }
     }
 
     /** Send an immediate announce (also called by the periodic timer). */
@@ -447,14 +541,25 @@ public final class MeshRouter {
         synchronized (routes) {
             for (Iterator<Pending> it = pendingDirects.values().iterator(); it.hasNext();) {
                 Pending p = it.next();
+                if (!p.aired) {
+                    // The latest copy is still waiting for airtime (MAC
+                    // queue): never retry or fail a frame that has not
+                    // transmitted — give up only if the queue is stuck.
+                    if (t - p.queuedAtMs > STUCK_FAIL_MS) {
+                        it.remove();
+                        failed.add(p);
+                    }
+                    continue;
+                }
                 if (t < p.nextAttemptMs) continue;
                 if (p.tries >= MAX_RETRIES) {
                     it.remove();
                     failed.add(p);
                 } else {
                     p.tries++;
-                    p.nextAttemptMs = t + RETRY_BASE_MS
-                            + (long) random.nextInt((int) RETRY_JITTER_MS);
+                    p.aired = false;            // re-armed when the copy airs
+                    p.queuedAtMs = t;
+                    p.nextAttemptMs = Long.MAX_VALUE;
                     due.add(p);
                 }
             }
