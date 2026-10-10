@@ -31,6 +31,10 @@ USB mid-session broke receive audio, and USB TX audio was faint.
 - PTT key-failure log generalized: `PTT: keying write failed (…)`.
 - Test campaign: PTT-04 (Digirig Lite GPIO keying), PTT-05
   (mid-session unplug/replug recovers RX automatically).
+- ICD figures rebuilt: thirteen annotated 0.26 screenshots (Tools
+  entry, both Audio Setup halves, every selector expanded, Options
+  incl. C2 Bridge / Push to RF, full-page Decodes, running header,
+  live Activity Log, session-log save) replace the 0.20-era set.
 
 ---
 
