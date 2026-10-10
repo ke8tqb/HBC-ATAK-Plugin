@@ -13,6 +13,19 @@ distance-vector mesh frame, and modulated as audio by your choice of
 three software modems — including the Mercury HF waveform for long-haul
 SSB work.
 
+## Documentation
+
+- [`docs/HBC_ICD.html`](docs/HBC_ICD.html) ([PDF](docs/HBC_ICD.pdf)) —
+  Interface Control Document v1.4: per-control GUI reference with
+  annotated screenshots, wire formats, channel-access (CSMA/Ring MAC)
+  specification, and log interpretation guides
+- [`docs/PROTOCOL.md`](docs/PROTOCOL.md),
+  [`docs/RADIO_SETUP.md`](docs/RADIO_SETUP.md),
+  [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md)
+- [`docs/Unencrypted_Distance-Vector_Routing_for_Amateur_Radio.pdf`](docs/Unencrypted_Distance-Vector_Routing_for_Amateur_Radio.pdf)
+  — the routing design the mesh layer implements
+- [`CHANGELOG.md`](CHANGELOG.md) — per-version details
+
 ---
 
 ## How it works
@@ -263,18 +276,6 @@ implementation, `MeshRouterTest` (mesh framing/routing vectors),
 `BridgePolicyTest` (C2 Bridge diode/forward/stash rules), plus
 `DemodFile` for running recorded audio through the demodulator offline.
 
-## Documentation
-
-- [`docs/HBC_ICD.html`](docs/HBC_ICD.html) ([PDF](docs/HBC_ICD.pdf)) —
-  Interface Control Document v1.4: per-control GUI reference with
-  annotated screenshots, wire formats, channel-access (CSMA/Ring MAC)
-  specification, and log interpretation guides
-- [`docs/PROTOCOL.md`](docs/PROTOCOL.md),
-  [`docs/RADIO_SETUP.md`](docs/RADIO_SETUP.md),
-  [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md)
-- [`docs/Unencrypted_Distance-Vector_Routing_for_Amateur_Radio.pdf`](docs/Unencrypted_Distance-Vector_Routing_for_Amateur_Radio.pdf)
-  — the routing design the mesh layer implements
-- [`CHANGELOG.md`](CHANGELOG.md) — per-version details
 
 ## License
 
