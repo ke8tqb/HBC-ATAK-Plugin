@@ -35,14 +35,18 @@
   <h1>HBC RADIO</h1>
   <div class="sub">ATAK Plugin &mdash; Interface Control Document</div>
   <div class="sub">Ham Binary CoT over Distance-Vector Mesh Radio</div>
-  <div class="contact">Version 1.5 &nbsp;|&nbsp; KE8TQB &nbsp;|&nbsp; github.com/ke8tqb/HBC-ATAK-Plugin</div>
+  <div class="contact">Version 1.7 &nbsp;|&nbsp; KE8TQB &nbsp;|&nbsp; github.com/ke8tqb/HBC-ATAK-Plugin</div>
 </div>
 
 <div class="toc">
 <h2>Table of Contents</h2>
 <ol>
   <li>Overview</li>
-  <li>System Architecture</li>
+  <li>System Architecture
+    <ol>
+      <li>2.1 &nbsp;C2 Bridge &mdash; One-Way RF &rarr; Network Data Diode</li>
+    </ol>
+  </li>
   <li>Physical Layer (Audio Modems)
     <ol>
       <li>3.1 &nbsp;AFSK1200 / AX.25</li>
@@ -129,6 +133,34 @@ forward it toward its destination, rebroadcast it (announces), or ignore it.</p>
   <tr><td>Network</td><td>MeshRouter</td><td>Origin / Transmitter / Destination / Next-hop callsigns</td></tr>
   <tr><td>Physical</td><td>AudioModem, OfdmModem, MercuryModem</td><td>None &mdash; just a byte pipe (AFSK adds a fixed AX.25 wrapper for station ID)</td></tr>
 </table>
+
+<h3>2.1 C2 Bridge &mdash; One-Way RF &rarr; Network Data Diode (plugin 0.24)</h3>
+<p>A station that hears the radio mesh AND sits on a normal ATAK network at the same time
+(WiFi mesh SA or a TAK server connection) can act as a <b>C2 Bridge</b>: a command-post
+gateway that pushes the radio picture onto the network without ever letting network-volume
+traffic flood the slow radio channel. Enabled by the <b>C2 Bridge</b> checkbox (Options
+tab); the header shows <b>&middot; BRIDGE</b> while active.</p>
+<ul>
+  <li><b>Radio &rarr; network (automatic).</b> Every event decoded from the radio &mdash;
+      positions, markers, 911 alerts, shapes, CASEVAC, broadcast/room chat &mdash; is
+      re-published onto the ATAK network outputs so command-post users see it. Mode 0
+      receipts (radio ARQ plumbing) and direct messages addressed to the bridge operator
+      (private) are not forwarded. Forwarded position reports are re-rendered <i>without</i>
+      the chat endpoint: network users see the radio stations on the map but cannot open a
+      chat to a station that could never answer through a one-way bridge.</li>
+  <li><b>Network &rarr; radio (manual only).</b> The bridge phone still displays everything
+      the network sends it, but NOTHING network-originated is automatically transmitted
+      over radio. The bridge&rsquo;s own traffic (its PLI, its operator&rsquo;s markers and
+      chats, receipts for radio DMs) transmits normally; everything else is blocked and
+      kept for 10 minutes in the <b>Push to RF</b> list, where the operator hand-picks the
+      individual items worth airtime &mdash; the human is the rate limiter. Radio-origin
+      events are tagged when forwarded so they can never echo back onto the air.</li>
+</ul>
+<div class="note"><b>NOTE:</b> The bridge is pure local behavior on the bridge phone
+&mdash; nothing on the air changes, remote stations need no update, and the one-way design
+also keeps unlicensed network users&rsquo; traffic off the amateur bands (FCC Part 97): the
+only transmissions are initiated by the control operator&rsquo;s own station, automatically
+for its own data or deliberately via Push to RF.</div>
 
 <h2>3. Physical Layer (Audio Modems)</h2>
 <p>A modem converts bytes into sound and sound back into bytes. HBC Radio offers three, each
@@ -227,7 +259,10 @@ exposes only VOX <i>sensitivity</i> 1&ndash;10 &mdash; and both hold the transmi
 roughly 1.0&ndash;1.5 s after audio stops. The 1500 ms Guard default covers that worst
 case. Their VOX attack also clips the first ~150&ndash;250 ms of audio, so set
 <b>VOX Lead = 250 ms</b> when driving these radios. Both radios&rsquo; time-out timers
-(&ge;60 s) are far above the longest turn &mdash; no interaction.</div>
+(&ge;60 s) are far above the longest turn &mdash; no interaction. With a Digirig-class USB
+interface, select <b>TX output = USB + RTS PTT</b> (0.25) instead: the plugin keys the
+radio electrically, VOX is out of the picture entirely, and Guard 300&ndash;500 ms /
+VOX Lead 0 apply.</div>
 <div class="plain"><b>Calibrating Guard:</b> run a two-station session, key one radio with
 a short test transmission, and read the session log&rsquo;s receive timing (the gap between
 the end of decoded audio and the next burst, or the AFSK RX burst lines) to measure how
@@ -529,9 +564,12 @@ update.</div>
   <tr><td>PLI min s</td><td>Number field</td><td>Minimum seconds between your own position reports (rate limit). Default 60. Drives the &ldquo;Next PLI&rdquo; countdown.</td></tr>
   <tr><td>Modem</td><td>Dropdown</td><td>Which of the three waveforms to use (section 3). Listed OFDM (Rattlegram), Mercury, AX.25/APRS; <b>OFDM is the default</b>. Must match on every station.</td></tr>
   <tr><td>TX audio stream</td><td>Dropdown</td><td>Which Android audio channel carries the transmit tones (Figure 3). Default Alarm; try the others only if your device distorts the tones.</td></tr>
+  <tr><td>TX output / PTT</td><td>Dropdown</td><td>Where transmit audio goes and how the radio is keyed (0.25). <b>Speaker &mdash; VOX / acoustic</b> (default): audio plays from the phone speaker into the radio&rsquo;s mic and the radio&rsquo;s VOX (or a finger on PTT) keys the transmitter; TX audio is now explicitly pinned to the speaker even when a USB interface is attached. <b>USB + RTS PTT (Digirig)</b>: TX audio is routed to the USB audio interface on the MEDIA stream (set Media volume to max &mdash; 0.26) and the plugin keys the radio electrically 60 ms before each burst: CP210x serial RTS on the Digirig Mobile, CM108 GPIO on the Digirig Lite (0.26) &mdash; no VOX attack or hang, so Guard 300&ndash;500 ms and VOX Lead 0 apply (&#9432; dialog). Requires a one-time Android USB permission.</td></tr>
   <tr><td>Channel access</td><td>Dropdown</td><td>CSMA (legacy contention, section 3.4) or Ring (deterministic turns, section 3.5). Must match on every station.</td></tr>
   <tr><td>&#9432; UV-5R / FT-65 defaults</td><td>Help link</td><td>Opens a dialog with the recommended Ring/VOX values for the reference radios, why their VOX hang cannot be shortened, the Guard calibration procedure, and hardwired-PTT alternatives (section 3.5).</td></tr>
   <tr><td>Guard ms / Skip ms / Max turn ms</td><td>Number fields</td><td>Ring MAC timing (section 3.5): Guard covers the radios&rsquo; VOX hang (default 1500), Skip covers VOX attack before skipping a silent station (default 1200), Max turn caps one batch (0 = automatic per modem). Same values on every station. Since 0.23 a larger Max turn also fits more frames into each batch (faster queue drain at the cost of longer turns).</td></tr>
+  <tr><td>C2 Bridge (radio &rarr; network, one-way)</td><td>Checkbox (Options tab)</td><td>Activates the one-way data diode of section 2.1: decoded radio traffic is re-published onto the ATAK network, while network-origin events are blocked from automatic radio transmission and stashed for Push to RF. Takes effect immediately; the header shows <b>&middot; BRIDGE</b> while on.</td></tr>
+  <tr><td>Push to RF&hellip;</td><td>Button (Options tab)</td><td>Opens a multi-select list of recently blocked network-origin items (newest 20, kept 10 minutes). Confirming transmits the selected items over radio once, through the normal HBC encode/queue path &mdash; the deliberate operator exception to the diode.</td></tr>
   <tr><td>Transmit / Receive</td><td>Checkboxes</td><td>Master switches. Unchecking Transmit makes the station receive-only; unchecking Receive ignores all incoming audio.</td></tr>
   <tr><td>PLI, Spots, Alerts, Chat, Shapes, CASEVAC</td><td>Checkboxes</td><td>Per-type transmit filters, matching the HBC modes of section 5.2. An unchecked type is never transmitted (receiving is unaffected).</td></tr>
   <tr><td>Start / Stop Radio Link</td><td>Button (header, always visible)</td><td>Validates and saves the settings, then starts (or stops) the selected modem and the mesh layer. The label flips to match the current state.</td></tr>
@@ -566,7 +604,18 @@ runtime) and what each one means.</p>
   <tr><td class="mono">CSMA: channel busy &gt; 8 s &mdash; transmitting anyway</td><td>The channel never cleared, so the frame was sent to avoid starving traffic.</td></tr>
   <tr><td class="mono">OFDM sync: {call} ... / Mercury sync acquired</td><td>The demodulator locked onto an incoming signal (decode result follows).</td></tr>
   <tr><td class="mono">TX batch: {n} frames ({t} ms burst)</td><td>Several queued frames went out as one continuous keying (one VOX cycle for the whole batch).</td></tr>
+  <tr><td class="mono">PTT: USB RTS ready ({name}) / PTT: USB GPIO ready ({name})</td><td>The keyer is open &mdash; CP210x serial RTS (Digirig Mobile) or CM108 GPIO (Digirig Lite, 0.26); every transmission keys the radio electrically.</td></tr>
+  <tr><td class="mono">PTT: no Digirig PTT device found (CP210x serial or CM108 GPIO) &mdash; using VOX/manual keying</td><td>USB + RTS PTT is selected but no keyer hardware is attached; audio still plays, but the radio must be keyed by VOX or by hand.</td></tr>
+  <tr><td class="mono">PTT: TX audio uses the Media volume on USB &mdash; set Media volume to max</td><td>Reminder on engage (0.26): over USB the tones ride the MEDIA stream; a low Media volume makes TX into the radio faint.</td></tr>
+  <tr><td class="mono">PTT: requesting USB access &mdash; approve the dialog (RTS engages automatically)</td><td>Android is showing its &ldquo;Allow ATAK to access the USB device?&rdquo; dialog; after Allow, RTS PTT engages by itself (<code>PTT: USB permission granted</code> follows). Denying logs <code>PTT: USB permission denied</code>.</td></tr>
+  <tr><td class="mono">PTT: RTS write failed ({code}) &mdash; reconnect the Digirig and Stop/Start</td><td>The USB device stopped accepting the keying command (unplugged/re-enumerated); reconnect and restart the link.</td></tr>
+  <tr><td class="mono">PTT: Digirig attached &mdash; engaging / PTT: Digirig detached &mdash; RTS PTT off (VOX/manual keying)</td><td>Hot-plug while the link runs: attaching a Digirig engages PTT automatically; detaching falls back to plain audio. Since 0.26 every USB attach/detach also re-opens the receive path (a fresh <code>RX audio source: &hellip;</code> line follows) &mdash; no Stop/Start needed after a reconnect.</td></tr>
 </table>
+<div class="note"><b>NOTE:</b> plugging in the Digirig may also pop Android&rsquo;s generic
+&ldquo;Choose an app for the USB device&rdquo; chooser. ATAK is not listed there (it registers
+no USB-launch handler) and that chooser is irrelevant to the plugin &mdash; dismiss it. The
+dialog that matters is the <i>Allow ATAK to access the USB device</i> permission prompt the
+plugin raises when the radio link starts in USB + RTS PTT mode.</div>
 <p><b>Channel access (Ring MAC, section 3.5):</b></p>
 <table>
   <tr><th>Message</th><th>Meaning</th></tr>
@@ -577,6 +626,14 @@ runtime) and what each one means.</p>
   <tr><td class="mono">Ring: {call} dormant (3 silent turns)</td><td>That station has not transmitted for 3 cycles; it keeps costing only the Skip time.</td></tr>
   <tr><td class="mono">Ring: emergency frame queued &mdash; preempting at next idle window / Ring: emergency TX ({x} frames, preempt)</td><td>A 911 alert jumped the turn order in an idle gap (the single allowed exception).</td></tr>
   <tr><td class="mono">Ring: TX queue {n} frames (~{t} s to drain)</td><td>More than 6 frames are waiting for this station&rsquo;s turns (estimate from the measured rotation time; logged at most every 30 s). If it persists, slow down chat/marker sends &mdash; see section 3.5&rsquo;s ARQ-interaction note.</td></tr>
+</table>
+<p><b>C2 Bridge (section 2.1):</b></p>
+<table>
+  <tr><th>Message</th><th>Meaning</th></tr>
+  <tr><td class="mono">Bridge: {summary} -&gt; network</td><td>A decoded radio event was re-published onto the ATAK network outputs (TAK server / mesh SA).</td></tr>
+  <tr><td class="mono">Bridge: blocked {type} {uid} (network-origin) &mdash; use Push to RF</td><td>The diode stopped a network-origin event from auto-transmitting over radio; it is available in the Push to RF list for 10 minutes.</td></tr>
+  <tr><td class="mono">Bridge: manual push mode {n} ({x} B) {type} -&gt; RF</td><td>The operator selected this item in Push to RF; it was encoded and queued for radio exactly like native traffic.</td></tr>
+  <tr><td class="mono">Bridge: push skip: {reason}</td><td>A selected item has no HBC representation (unsupported type/characters) and was not transmitted.</td></tr>
 </table>
 <p><b>Transmit decisions:</b></p>
 <table>
@@ -668,6 +725,13 @@ answers &ldquo;what have I actually received?&rdquo;</div>
       PLI floor &times; 8 s) are likewise behavioral only &mdash; wire-identical with 0.22.
       In a mixed net, 0.22-and-earlier stations simply keep their old 5 s retry behavior
       (and its queue growth) while 0.23 stations do not.</li>
+  <li>The 0.24 C2 Bridge (section 2.1) is local behavior on the bridge phone only &mdash;
+      one-way RF &rarr; network by design. Radio-side stations need no update and hear
+      nothing new on the air except items the bridge operator deliberately pushes; network
+      clients just receive ordinary CoT.</li>
+  <li>The 0.25 TX output / RTS PTT selector only changes how the local station keys its
+      own radio &mdash; the waveforms are identical, so VOX-keyed and RTS-keyed stations
+      mix freely on one channel (RTS stations may simply run tighter Guard timing).</li>
   <li>Mercury DATAC4&rsquo;s small frame limits routed Directs to ~29 bytes of HBC payload
       (Broadcasts ~39 B). Every standard message fits; unusually large Mode 6 markers may
       need Broadcast or a different modem.</li>
@@ -689,6 +753,7 @@ answers &ldquo;what have I actually received?&rdquo;</div>
   <tr><td>Route / next hop</td><td>Address-book entry: which neighbor to hand a message to so it reaches a destination</td></tr>
   <tr><td>ACK</td><td>Acknowledgment &mdash; a short &ldquo;received OK&rdquo; reply</td></tr>
   <tr><td>ARQ</td><td>Automatic Repeat reQuest &mdash; send, await the ACK, re-send on timeout (section 4.9)</td></tr>
+  <tr><td>C2 Bridge / data diode</td><td>The 0.24 one-way gateway (section 2.1): radio traffic flows to the network automatically; network traffic reaches the radio only by deliberate operator action</td></tr>
   <tr><td>CSMA</td><td>Carrier Sense Multiple Access &mdash; listen before transmitting to avoid collisions</td></tr>
   <tr><td>MAC</td><td>Medium Access Control &mdash; the rules deciding when a station may transmit (CSMA or Ring here)</td></tr>
   <tr><td>Ring MAC / turn</td><td>The 0.22 channel-access mode: stations rotate through the sorted roster; a turn is one station&rsquo;s transmit window</td></tr>
@@ -727,7 +792,10 @@ everything described in this document is implemented.</p>
 │       │   │   ├── BitReader.java        Bit-level read helper for the codec
 │       │   │   ├── BitWriter.java        Bit-level write helper for the codec
 │       │   │   ├── MeshRouter.java       Mesh network layer: packets, routing,
-│       │   │   │                         retries, ACKs (Section 4)
+│       │   │   │                         retries, ACKs (Section 4, 4.9)
+│       │   │   ├── RingMac.java          Ring MAC turn rotation (Section 3.5)
+│       │   │   ├── BridgePolicy.java     C2 Bridge data-diode rules + push stash (Section 2.1)
+│       │   │   ├── PttKeyer.java         Hardware-PTT hook used by the modems (0.25)
 │       │   │   ├── CsmaSense.java        Listen-before-transmit logic (Section 3.4)
 │       │   │   ├── AudioModem.java       AFSK1200 modem (Section 3.1)
 │       │   │   ├── OfdmModem.java        OFDM COFDMTV modem (Section 3.2)
@@ -735,8 +803,9 @@ everything described in this document is implemented.</p>
 │       │   │   ├── MercuryModem.java     Mercury HF modem (Section 3.3)
 │       │   │   ├── MercuryNative.java    Java ↔ C bridge for the FreeDV library
 │       │   │   └── plugin/
-│       │   │       └── HbcPlugin.java    The plugin itself: settings pane, toolbar
-│       │   │                             icons, TX/RX plumbing, ATAK integration
+│       │   │       ├── HbcPlugin.java    The plugin itself: settings pane, toolbar
+│       │   │       │                     icons, TX/RX plumbing, ATAK integration
+│       │   │       └── UsbPtt.java       Digirig CP210x RTS PTT driver (0.25)
 │       │   └── sivantoledo/ax25/...      Bundled javAX25 library (AFSK/AX.25, GPL)
 │       ├── cpp/
 │       │   ├── CMakeLists.txt            Native build: libhbcofdm + libhbcmercury
@@ -749,10 +818,13 @@ everything described in this document is implemented.</p>
 │       └── res/
 │           ├── layout/main_layout.xml    The settings/decodes pane (Figures 1–6)
 │           ├── values/strings.xml        All UI text and dropdown options
-│           └── drawable/                 Icons, incl. ic_radio_on/off (status icon)
+│           └── drawable/                 Icons (ic_tools Tools-grid glyph, ic_launcher badge)
 ├── codec-test/
 │   ├── HbcCodecTest.java             Byte-exact tests for the HBC codec (runs on a PC)
-│   └── MeshRouterTest.java           Byte-exact + behavior tests for the mesh layer
+│   ├── Mode6Test.java                Byte-exact tests for Mode 6 extended markers
+│   ├── MeshRouterTest.java           Byte-exact + behavior tests for the mesh layer
+│   ├── RingMacTest.java              Ring MAC turn rules under a scripted clock
+│   └── BridgePolicyTest.java         C2 Bridge diode/forward/stash rules
 ├── docs/
 │   ├── HBC_ICD.html                  This document (editable source)
 │   ├── HBC_ICD.pdf                   This document (rendered)
@@ -771,7 +843,7 @@ in <code>HbcPlugin.java</code> plus <code>res/layout/main_layout.xml</code>. The
 <code>codec-test/</code> programs run on an ordinary computer (no phone needed) and prove the
 byte formats match this document.</div>
 
-<div class="footer">HBC Radio ICD &nbsp;Version 1.2 &nbsp;|&nbsp; Aug 2026 &nbsp;|&nbsp; KE8TQB &nbsp;|&nbsp; github.com/ke8tqb/HBC-ATAK-Plugin</div>
+<div class="footer">HBC Radio ICD &nbsp;Version 1.7 &nbsp;|&nbsp; Oct 2026 &nbsp;|&nbsp; KE8TQB &nbsp;|&nbsp; github.com/ke8tqb/HBC-ATAK-Plugin</div>
 
 </body>
 </html>

@@ -89,6 +89,24 @@ N frames` warning appears if a backlog builds. The in-app PLI interval
 floor rose to roster × 8 s (Mercury × 13 s); see ICD §3.5/§4.9 for the
 numbers behind both.
 
+v0.25 adds **hardware PTT**: with a Digirig-class USB interface,
+select **TX output / PTT = USB + RTS PTT** and the plugin keys the
+radio over the CP210x serial RTS line (raw USB control transfers — no
+serial-driver dependency). No VOX attack or hang means VOX Lead 0 and
+Guard 300–500 ms, so ring turns get much shorter. This is the
+supported path for cabled setups: the UV-5R/FT-65's fixed-threshold
+VOX cannot trip on Digirig-level audio anyway. On first start Android
+shows an "Allow ATAK to access the USB device?" prompt — tap Allow and
+RTS engages automatically (dismiss the unrelated "Choose an app"
+popup that may appear when plugging the cable in; ATAK is
+intentionally not in that list).
+
+v0.26 extends USB support: the **Digirig Lite** keys via its CM108
+sound-chip GPIO (same selector, auto-detected), USB TX audio rides
+the **Media** stream (set Media volume to max — fixes faint TX), and
+any mid-session USB unplug/replug now re-opens the receive path
+automatically — no Stop/Start needed.
+
 ## Mesh networking
 
 Every frame carries a 13-byte distance-vector mesh header implementing
@@ -112,6 +130,22 @@ modems:
 - **Heard stations become ATAK chat contacts** — a single received PLI
   makes the station selectable for direct chat (v0.18).
 
+## C2 Bridge (one-way radio → network, v0.24)
+
+A command-post phone can run HBC and sit on a normal ATAK network
+(TAK server / mesh SA) at the same time. Ticking **C2 Bridge**
+(Options tab) turns it into a one-way data diode: every decoded radio
+event is re-published onto the network so LAN users see the field
+picture, while **nothing network-originated is ever auto-relayed to
+the radio** — the slow RF channel cannot be flooded, and unlicensed
+network users stay off the air. The bridge's own traffic (PLI,
+markers, chat) still transmits normally, and the **Push to RF…**
+dialog lets the operator hand-pick individual network items worth
+airtime (kept 10 minutes, newest 20). Forwarded radio PLIs are
+published without a chat endpoint so LAN users can't try to DM
+through a one-way link, and radio-origin events are tagged so they
+never echo back onto the air. See ICD §2.1.
+
 ## Message types (HBC modes)
 
 - **PLI / Spot** position reports and markers with Friendly / Hostile /
@@ -134,13 +168,16 @@ Start/Stop button):
 - **Audio Setup** — modem selection (OFDM default; OFDM / Mercury /
   AX.25-APRS, must match on all stations), TX audio stream (Alarm /
   Media / Ring / Notification — Alarm bypasses Samsung media DSP that
-  distorts FSK tones), AFSK TX level %, TX dwell (TXDelay preamble),
-  VOX leader duration, and Channel access (CSMA / Ring) with Guard /
-  Skip / Max-turn fields and the ⓘ UV-5R / FT-65 defaults help dialog
+  distorts FSK tones), TX output / PTT (phone speaker for VOX/acoustic
+  coupling, or USB + RTS PTT for a Digirig — v0.25), AFSK TX level %,
+  TX dwell (TXDelay preamble), VOX leader duration, and Channel access
+  (CSMA / Ring) with Guard / Skip / Max-turn fields and the ⓘ UV-5R /
+  FT-65 defaults help dialog
 - **Options** — ham callsign (ITA2-validated, max 8 chars; required),
   Send-to (Broadcast, or route markers/points direct to any station
   learned from the mesh), PLI rate limit, TX/RX enables,
-  per-message-type transmit toggles
+  per-message-type transmit toggles, and the C2 Bridge one-way
+  gateway with its Push to RF dialog (v0.24)
 - **Decodes** — a full-panel page (◀ Back returns to settings) showing
   every received packet with timestamp, source, mode summary and
   payload size, above the live activity log
@@ -222,7 +259,8 @@ Pipeline source-archive requirements and how this repo meets them:
 (`HbcCodecTest`, `Mode6Test`) verifying byte-for-byte parity with the
 Python [HBC-Protocol](https://github.com/ke8tqb/HBC-Protocol)
 implementation, `MeshRouterTest` (mesh framing/routing vectors),
-`RingMacTest` (Ring MAC turn rules under a scripted clock), plus
+`RingMacTest` (Ring MAC turn rules under a scripted clock),
+`BridgePolicyTest` (C2 Bridge diode/forward/stash rules), plus
 `DemodFile` for running recorded audio through the demodulator offline.
 
 ## Documentation

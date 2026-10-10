@@ -110,6 +110,42 @@ public class OfdmModem {
         maxBatchFrames = Math.max(1, n);
     }
 
+    // v0.25: TX output routing + optional hardware PTT (Digirig RTS)
+    public static final int TX_OUT_SPEAKER = 0;
+    public static final int TX_OUT_USB_RTS = 1;
+    private volatile int txOutput = TX_OUT_SPEAKER;
+    private volatile PttKeyer ptt;
+
+    /** 0 = built-in speaker (VOX/acoustic coupling), 1 = USB audio + RTS PTT. */
+    public void setTxOutput(int mode) {
+        txOutput = mode == TX_OUT_USB_RTS ? TX_OUT_USB_RTS : TX_OUT_SPEAKER;
+    }
+
+    /** Hardware keyer asserted around each rendered transmission (nullable). */
+    public void setPtt(PttKeyer keyer) {
+        ptt = keyer;
+    }
+
+    /** The built-in speaker output device, or null. */
+    private AudioDeviceInfo findSpeaker() {
+        try {
+            AudioManager am = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
+            for (AudioDeviceInfo d : am.getDevices(AudioManager.GET_DEVICES_OUTPUTS))
+                if (d.getType() == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER)
+                    return d;
+        } catch (Exception ignored) {}
+        return null;
+    }
+
+    // v0.26: USB hot-plug — the RX thread re-opens its AudioRecord so the
+    // capture path follows the newly attached/removed device.
+    private volatile boolean rxRebindRequested = false;
+
+    /** Re-open RX on the current best input device (USB hot-plug). */
+    public void rebindAudio() {
+        rxRebindRequested = true;
+    }
+
     public synchronized void start() throws Exception {
         if (running) return;
         if (!OfdmNative.createEncoder(SAMPLE_RATE))
@@ -173,6 +209,16 @@ public class OfdmModem {
     }
 
     private AudioAttributes txAttributes() {
+        if (txOutput == TX_OUT_USB_RTS) {
+            // v0.26: over USB use the MEDIA stream — the Alarm trick only
+            // dodges speaker DSP, and alarm volume on USB sinks is low or
+            // fixed on some OEMs (faint TX into the radio). Media volume
+            // is predictable; set it to max for the Digirig.
+            return new AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                    .build();
+        }
         AudioAttributes.Builder b = new AudioAttributes.Builder()
                 .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION);
         if (txStream == AudioManager.STREAM_MUSIC)
@@ -310,11 +356,19 @@ public class OfdmModem {
                         .build();
                 track = new AudioTrack(txAttributes(), fmt, pcm.length * 2,
                         AudioTrack.MODE_STATIC, 0);
-                AudioDeviceInfo usbOut = findUsbDevice(true);
-                if (usbOut != null)
-                    track.setPreferredDevice(usbOut);
+                // v0.25: explicit TX routing — USB (Digirig) or the
+                // built-in speaker for acoustic/VOX coupling
+                AudioDeviceInfo out = txOutput == TX_OUT_USB_RTS
+                        ? findUsbDevice(true) : findSpeaker();
+                if (out != null)
+                    track.setPreferredDevice(out);
                 track.write(pcm, 0, pcm.length);
                 track.setVolume(1.0f);
+                PttKeyer keyer = ptt;
+                if (keyer != null) {
+                    keyer.key(true);   // hardware PTT up (Digirig RTS)
+                    Thread.sleep(60);  // radio TX settle; lead silence covers the rest
+                }
                 track.play();
 
                 long durMs = 1000L * pcm.length / SAMPLE_RATE;
@@ -332,6 +386,9 @@ public class OfdmModem {
             } catch (Exception e) {
                 listener.onStatus("TX error: " + e.getMessage());
             } finally {
+                PttKeyer keyer = ptt;
+                if (keyer != null)
+                    keyer.key(false);  // hardware PTT down
                 if (track != null) {
                     try { track.stop(); } catch (Exception ignored) {}
                     try { track.release(); } catch (Exception ignored) {}
@@ -398,6 +455,22 @@ public class OfdmModem {
             short[] pcm = new short[SYMBOL_SAMPLES];
             String stagedCall = "";
             while (running) {
+                if (rxRebindRequested) {
+                    rxRebindRequested = false;
+                    // v0.26: USB device changed — re-open capture so RX
+                    // follows it without a Stop/Start.
+                    try { record.stop(); } catch (Exception ignored) {}
+                    try { record.release(); } catch (Exception ignored) {}
+                    RxAudioEffects.release(rxEffects);
+                    record = openRecord();
+                    if (record == null) {
+                        listener.onStatus("RX disabled: microphone "
+                                + "unavailable after USB change");
+                        return;
+                    }
+                    record.startRecording();
+                    continue;
+                }
                 int n = record.read(pcm, 0, pcm.length);
                 if (n <= 0) continue;
                 if (transmitting) continue; // half duplex

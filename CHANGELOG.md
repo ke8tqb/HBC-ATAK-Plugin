@@ -4,6 +4,128 @@ All notable changes to HBC Audio Plugin are documented here.
 
 ---
 
+## [0.26] — Digirig Lite support + USB hot-plug audio recovery + USB TX level
+
+Field findings from the 10-09 RF test (Digirig Mobile now keys
+reliably): the Digirig Mobile **Lite** did not route/key, reconnecting
+USB mid-session broke receive audio, and USB TX audio was faint.
+
+- **Digirig Lite (CM108 GPIO PTT).** The Lite has no CP210x — its PTT
+  is a GPIO pin on the CM108-family audio chip. `UsbPtt` now falls
+  back to C-Media devices (VID 0x0D8C/0x0C76), claims their HID
+  interface and keys GPIO3 with Direwolf-compatible SET_REPORT
+  transfers (`{0, mask 0x04, data, 0}`). Log: `PTT: USB GPIO ready
+  (…)`; the scan-miss message is now `PTT: no Digirig PTT device
+  found (CP210x serial or CM108 GPIO)`.
+- **USB hot-plug audio recovery.** Any USB attach/detach while the
+  link runs now asks the active modem to re-open its AudioRecord
+  (`rebindAudio()` — a fresh `RX audio source: …` line confirms the
+  new path), so receive recovers without Stop/Start after a
+  disconnect/reconnect. TX already re-routes per burst.
+- **USB TX level fix.** In USB + RTS PTT mode the transmit tones now
+  ride the MEDIA stream instead of Alarm (the Alarm trick only exists
+  to dodge speaker DSP; alarm volume on USB sinks is low/fixed on
+  some OEMs — the "faint TX" finding). Set Media volume to max; the
+  log reminds you on engage. Speaker mode is unchanged (Alarm default
+  still bypasses Samsung speaker DSP).
+- PTT key-failure log generalized: `PTT: keying write failed (…)`.
+- Test campaign: PTT-04 (Digirig Lite GPIO keying), PTT-05
+  (mid-session unplug/replug recovers RX automatically).
+
+---
+
+## [0.25] — Selectable TX output: speaker/VOX or USB + RTS PTT (Digirig)
+
+Field finding: a Digirig-cabled FT-65 never keys via VOX — the Digirig
+is a hardware-PTT interface (its PTT transistor follows the CP210x
+serial port's RTS line) and the FT-65's fixed VOX threshold cannot
+trip on data-level audio arriving through the attenuated mic path.
+The plugin now keys the radio itself.
+
+- **"TX output / PTT" selector** (Audio Setup tab): *Speaker — VOX /
+  acoustic* (default; TX audio is now explicitly pinned to the
+  built-in speaker even when a USB interface is attached) or *USB +
+  RTS PTT (Digirig)* (TX audio routed to the USB audio interface, PTT
+  keyed electrically).
+- **Digirig RTS keying** (new `UsbPtt`): CP210x (VID 0x10C4) driven by
+  two raw USB vendor control transfers (IFC_ENABLE, SET_MHS) — no
+  serial-driver library, so the TAK pipeline build stays
+  dependency-free. RTS asserts 60 ms before each rendered burst (the
+  lead silence covers radio TX settle) and releases right after the
+  tail — one keying per batch, in all three modems via the new
+  `PttKeyer` hook.
+- With RTS PTT there is no VOX attack or hang: run VOX Lead 0 and
+  Guard 300–500 ms (ⓘ dialog updated) — much faster Ring rotations.
+- One-time Android USB permission: starting the link in USB mode
+  raises "Allow ATAK to access the USB device?" (explicit
+  PendingIntent — required since Android 14, where the implicit form
+  is silently rejected and no dialog ever appears); tapping Allow
+  engages RTS automatically via a grant receiver — no Stop/Start
+  needed. Android's generic "Choose an app for the USB device" popup
+  at plug-in time is unrelated and safe to dismiss. Activity Log
+  lines: `PTT: USB RTS ready (…)`, `PTT: requesting USB access …`,
+  `PTT: USB permission granted/denied`, `PTT: no CP210x …`,
+  `PTT: RTS write failed (…)`. Session-log header records
+  `out=speaker|usb-rts`.
+- Hot-plug: attaching the Digirig while the link is running engages
+  RTS PTT automatically (`PTT: Digirig attached — engaging`);
+  detaching it logs `PTT: Digirig detached — RTS PTT off` and TX falls
+  back to plain audio. (TX audio routing self-heals per burst; the RX
+  microphone still binds at Start, so Stop/Start once if you want RX
+  through the Digirig after a late plug-in.)
+- The ⓘ radio-defaults dialog text was rebuilt — it had shipped with
+  double-encoded punctuation since 0.22 and now renders cleanly.
+- Docs: ICD v1.7 (§6.2 control row, §6.4 PTT log lines, §3.5 radio
+  profile note, §8 compat bullet, Appendix tree) + regenerated PDF;
+  README; test campaign PTT-01..03.
+
+---
+
+## [0.24] — C2 Bridge: one-way radio → network data diode
+
+For command-post use: the phone running HBC can also sit on a normal
+ATAK network (TAK server / mesh SA) and gateway the radio picture to
+it — without ever letting network-volume traffic flood the RF channel.
+Pure local behavior: no wire-format change, remote stations need no
+update.
+
+- **C2 Bridge checkbox** (Options tab, default off; live effect). The
+  header shows `· BRIDGE` while active; the session-log header records
+  `bridge=on/off`.
+- **Radio → network (automatic).** Every decoded radio event — PLIs,
+  markers, 911 alerts, shapes, CASEVAC, broadcast/room chat — is
+  re-published onto the ATAK network outputs (external CoT dispatch).
+  Mode 0 receipts and the operator's private DMs stay local. Forwarded
+  PLIs are re-rendered without the chat endpoint, so network users see
+  radio stations on the map but cannot DM a station that could never
+  answer through a one-way bridge. Log: `Bridge: {summary} -> network`.
+- **Network → radio (manual only).** The bridge still displays
+  everything the network sends it, but nothing network-originated is
+  auto-relayed to RF: only events authored on the bridge itself (self
+  PLI, operator-placed items, own chats, receipts for radio DMs) still
+  transmit automatically. Everything else is blocked
+  (`Bridge: blocked {type} {uid} (network-origin) — use Push to RF`)
+  and stashed — newest 20 items, kept 10 minutes.
+- **Push to RF… dialog.** Multi-select list of the blocked items; the
+  operator hand-picks what is worth airtime. Selected items are
+  encoded through the normal HBC path (Send-to/DM routing, ring queue,
+  batching) exactly once — the human is the rate limiter. 911 alerts
+  pushed this way still get ring preemption.
+- **Echo-loop protection.** Forwarded radio events are tagged
+  (10-minute UID memory) and `HBC-*` / `GeoChat.HBC-*` UIDs are always
+  dropped by the diode, so an event can never do RF → LAN → RF.
+- **New `BridgePolicy.java`** — pure-Java forward/verdict/authorship
+  rules + the push stash, JVM-tested by new
+  `codec-test/BridgePolicyTest.java` (31 checks); all five suites
+  green.
+- **Docs.** ICD v1.6: new §2.1 (C2 Bridge data diode incl. Part 97
+  note), §6.2 rows, §6.4 `Bridge:` log table, §8 compat bullet,
+  glossary entry, Appendix A tree refreshed (RingMac/BridgePolicy/
+  test files); PDF regenerated. README C2 Bridge section. Test
+  campaign gains BRIDGE-01..06.
+
+---
+
 ## [0.23] — Ring-aware ARQ: fix chat-storm TX queue buildup
 
 Field test (10-07, 3 stations, OFDM + Ring) showed heavy chat building

@@ -132,6 +132,16 @@
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:text="@string/hbc_tx_output_label" />
+
+            <com.atakmap.android.gui.PluginSpinner
+                android:id="@+id/hbc_tx_output"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
                 android:text="@string/hbc_afsk_level_label" />
 
             <EditText
@@ -422,6 +432,40 @@
                     android:layout_weight="1"
                     android:checked="true"
                     android:text="@string/hbc_mode_casevac" />
+            </LinearLayout>
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/hbc_bridge_label"
+                android:textStyle="bold" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <CheckBox
+                    android:id="@+id/hbc_c2_bridge"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:checked="false"
+                    android:text="@string/hbc_c2_bridge" />
+
+                <Button
+                    android:id="@+id/hbc_push_rf"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:minHeight="0dp"
+                    android:minWidth="0dp"
+                    android:paddingLeft="10dp"
+                    android:paddingRight="10dp"
+                    android:paddingTop="6dp"
+                    android:paddingBottom="6dp"
+                    android:textSize="12sp"
+                    android:text="@string/hbc_push_rf" />
             </LinearLayout>
         </LinearLayout>
     </ScrollView>

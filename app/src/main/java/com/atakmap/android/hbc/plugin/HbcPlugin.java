@@ -16,6 +16,7 @@ import com.atak.plugins.impl.PluginContextProvider;
 import com.atak.plugins.impl.PluginLayoutInflater;
 import com.atakmap.android.cot.CotMapComponent;
 import com.atakmap.android.hbc.AudioModem;
+import com.atakmap.android.hbc.BridgePolicy;
 import com.atakmap.android.hbc.HbcDecoder;
 import com.atakmap.android.hbc.HbcEncoder;
 import com.atakmap.android.hbc.Ita2;
@@ -92,12 +93,28 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
     private volatile long lastQueueWarnMs = 0;
     private volatile int ringFramesPerTurn = 1;
 
+    // v0.24 C2 Bridge (one-way RF -> LAN data diode): UIDs we re-published
+    // onto the network (never allowed back to RF), and the stash of
+    // network-origin events blocked from auto-relay, awaiting the
+    // operator's "Push to RF" selection.
+    private final Map<String, Long> bridgedUids = new HashMap<>();
+    private final BridgePolicy.PushStash<CotEvent> blockedForPush =
+            new BridgePolicy.PushStash<>(20, 10 * 60_000L);
+
     // UI
     private EditText etCallsign, etDwell, etVoxLeader, etPliRate, etAfskLevel;
     private EditText etRingGuard, etRingSkip, etRingMaxTurn;
-    private android.widget.Spinner spTxStream, spModem, spSendTo, spMacMode;
+    private android.widget.Spinner spTxStream, spModem, spSendTo, spMacMode,
+            spTxOutput;
     private CheckBox cbTxEnable, cbRxEnable, cbSelfPli, cbChat, cbAlerts, cbShapes,
-            cbCasevac, cbSpots;
+            cbCasevac, cbSpots, cbC2Bridge;
+    private Button btnPushRf;
+
+    // v0.25: Digirig RTS keyer (open while the radio link runs in
+    // "USB + RTS PTT" TX output mode) + the USB-permission result
+    // receiver that engages it as soon as the user taps Allow
+    private UsbPtt usbPtt;
+    private android.content.BroadcastReceiver usbPermReceiver;
     private Button btnStartStop;
     private TextView tvStatus, tvLog, tvPliCountdown;
     private boolean pliTickerRunning = false;
@@ -302,6 +319,15 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
         cbChat      = v.findViewById(R.id.hbc_mode_chat);
         cbShapes    = v.findViewById(R.id.hbc_mode_shapes);
         cbCasevac   = v.findViewById(R.id.hbc_mode_casevac);
+        cbC2Bridge  = v.findViewById(R.id.hbc_c2_bridge);
+        btnPushRf   = v.findViewById(R.id.hbc_push_rf);
+        if (cbC2Bridge != null)
+            cbC2Bridge.setOnCheckedChangeListener((btn, checked) -> {
+                prefs.edit().putBoolean("c2_bridge", checked).apply();
+                updateUiState();
+            });
+        if (btnPushRf != null)
+            btnPushRf.setOnClickListener(view -> showPushRfDialog());
         tvPliCountdown = v.findViewById(R.id.hbc_pli_countdown);
         tvLog       = v.findViewById(R.id.hbc_log);
         if (tvLog != null)
@@ -338,6 +364,15 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
         modemAdapter.setDropDownViewResource(
                 android.R.layout.simple_spinner_dropdown_item);
         spModem.setAdapter(modemAdapter);
+
+        spTxOutput = v.findViewById(R.id.hbc_tx_output);
+        android.widget.ArrayAdapter<CharSequence> outAdapter =
+                android.widget.ArrayAdapter.createFromResource(pluginContext,
+                        R.array.hbc_tx_output_options,
+                        android.R.layout.simple_spinner_item);
+        outAdapter.setDropDownViewResource(
+                android.R.layout.simple_spinner_dropdown_item);
+        spTxOutput.setAdapter(outAdapter);
 
         spMacMode = v.findViewById(R.id.hbc_mac_mode);
         android.widget.ArrayAdapter<CharSequence> macAdapter =
@@ -456,8 +491,12 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
         cbChat.setChecked(prefs.getBoolean("mode_chat", true));
         cbShapes.setChecked(prefs.getBoolean("mode_shapes", true));
         cbCasevac.setChecked(prefs.getBoolean("mode_casevac", true));
+        if (cbC2Bridge != null)
+            cbC2Bridge.setChecked(prefs.getBoolean("c2_bridge", false));
         if (spTxStream != null)
             spTxStream.setSelection(prefs.getInt("tx_stream", 0));
+        if (spTxOutput != null)
+            spTxOutput.setSelection(prefs.getInt("tx_output", 0));
         if (spModem != null)
             spModem.setSelection(modemTypeToPos(prefs.getInt("modem_type", 1)));
         if (spMacMode != null)
@@ -514,8 +553,14 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
                 .putBoolean("mode_chat", cbChat.isChecked())
                 .putBoolean("mode_shapes", cbShapes.isChecked())
                 .putBoolean("mode_casevac", cbCasevac.isChecked())
+                .putBoolean("c2_bridge", cbC2Bridge != null
+                        ? cbC2Bridge.isChecked()
+                        : prefs.getBoolean("c2_bridge", false))
                 .putInt("tx_stream", spTxStream == null ? 0
                         : spTxStream.getSelectedItemPosition())
+                .putInt("tx_output", spTxOutput == null
+                        ? prefs.getInt("tx_output", 0)
+                        : spTxOutput.getSelectedItemPosition())
                 .putInt("modem_type", spModem == null ? 1
                         : modemPosToType(spModem.getSelectedItemPosition()))
                 .putInt("mac_mode", spMacMode == null ? 0
@@ -544,9 +589,10 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
         if (btnStartStop == null) return;
         btnStartStop.setText(started ? "Stop Radio Link" : "Start Radio Link");
         if (tvStatus != null) {
-            tvStatus.setText(started
+            String bridge = bridgeOn() ? " \u00b7 BRIDGE" : "";
+            tvStatus.setText((started
                     ? "HBC Radio \u2014 RUNNING as " + prefs.getString("callsign", "?")
-                    : "HBC Radio \u2014 STOPPED");
+                    : "HBC Radio \u2014 STOPPED") + bridge);
             // green while running, red while stopped
             tvStatus.setTextColor(started ? 0xFF00E676 : 0xFFFF5252);
         }
@@ -625,13 +671,18 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
             // fresh detailed session log (replaces any unsaved previous one)
             sessionLog = new SessionLog(
                     prefs.getString("callsign", ""), modemName(),
-                    "dwell=" + prefs.getInt("dwell_ms", 500)
+                    "build=" + BuildConfig.BUILD_STAMP
+                    + " v" + BuildConfig.VERSION_NAME
+                    + " dwell=" + prefs.getInt("dwell_ms", 500)
                     + "ms vox=" + prefs.getInt("vox_leader_ms", 0)
                     + "ms pliRate=" + prefs.getInt("pli_rate_s", 60)
                     + "s stream=" + prefs.getInt("tx_stream", 0)
+                    + " out=" + (prefs.getInt("tx_output", 0) == 1
+                            ? "usb-rts" : "speaker")
                     + " afskLevel=" + prefs.getInt("afsk_tx_level_pct", 50) + "%"
                     + " mac=" + (ringMode ? "ring guard=" + ringGuard
                             + "ms skip=" + ringSkip + "ms" : "csma")
+                    + " bridge=" + (bridgeOn() ? "on" : "off")
                     + " sendTo=" + prefs.getString("send_to", "(broadcast)")
                     + " tx=" + prefs.getBoolean("tx_enable", true)
                     + " rx=" + prefs.getBoolean("rx_enable", true));
@@ -657,6 +708,19 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
                     modem.start();
                     break;
             }
+
+            // v0.25: TX output routing + optional Digirig RTS PTT. In USB
+            // mode the radio is keyed electrically (no VOX attack/hang),
+            // so Guard 300-500 ms and VOX Lead 0 become usable.
+            int txOut = prefs.getInt("tx_output", 0);
+            if (modem != null)   modem.setTxOutput(txOut);
+            if (ofdm != null)    ofdm.setTxOutput(txOut);
+            if (mercury != null) mercury.setTxOutput(txOut);
+            if (txOut == 1) {
+                registerUsbPermReceiver();
+                engageUsbPtt();
+            }
+
             // Mesh routing layer above the modem
             mesh = new MeshRouter(prefs.getString("callsign", ""),
                     new MeshRouter.Callbacks() {
@@ -758,6 +822,8 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
             if (modem != null)   { modem.stop();   modem = null; }
             if (ofdm != null)    { ofdm.stop();    ofdm = null; }
             if (mercury != null) { mercury.stop(); mercury = null; }
+            if (usbPtt != null)  { usbPtt.close(); usbPtt = null; }
+            unregisterUsbPermReceiver();
         }
         if (started) log("Radio link stopped");
         started = false;
@@ -835,6 +901,271 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
         // waiting in the ring queue).
         MeshRouter ms = mesh;
         if (ms != null) ms.notifyTransmitted(frame);
+    }
+
+    // ------------------------------------------------------------------
+    // v0.25 USB RTS PTT plumbing
+    // ------------------------------------------------------------------
+    /** Context that owns USB access + receiver registration. */
+    private android.content.Context usbContext() {
+        try {
+            android.content.Context c = com.atakmap.android.maps.MapView
+                    .getMapView().getContext();
+            if (c != null) return c;
+        } catch (Throwable ignored) {}
+        return pluginContext;
+    }
+
+    /**
+     * Open the Digirig's CP210x and hand the keyer to the active modem.
+     * Safe to call repeatedly — no-ops once engaged. Called at Start and
+     * again from the USB-permission receiver when the user taps Allow.
+     */
+    private synchronized void engageUsbPtt() {
+        if (usbPtt != null) return;
+        if (prefs.getInt("tx_output", 0) != 1) return;
+        if (modem == null && ofdm == null && mercury == null) return;
+        usbPtt = UsbPtt.open(usbContext(), this::log);
+        if (usbPtt != null) {
+            if (modem != null)   modem.setPtt(usbPtt);
+            if (ofdm != null)    ofdm.setPtt(usbPtt);
+            if (mercury != null) mercury.setPtt(usbPtt);
+            // v0.26: USB TX rides the MEDIA stream for predictable level
+            log("PTT: TX audio uses the Media volume on USB \u2014 "
+                    + "set Media volume to max");
+        }
+    }
+
+    /** Detach cleanup: drop the keyer so TX falls back cleanly. */
+    private synchronized void disengageUsbPtt() {
+        if (usbPtt == null) return;
+        usbPtt.close();
+        usbPtt = null;
+        if (modem != null)   modem.setPtt(null);
+        if (ofdm != null)    ofdm.setPtt(null);
+        if (mercury != null) mercury.setPtt(null);
+        log("PTT: Digirig detached \u2014 RTS PTT off (VOX/manual keying)");
+    }
+
+    /** CP210x serial (Digirig Mobile) or CM108-family (Digirig Lite). */
+    private static boolean isPttDevice(android.content.Intent intent) {
+        try {
+            android.hardware.usb.UsbDevice d = intent.getParcelableExtra(
+                    android.hardware.usb.UsbManager.EXTRA_DEVICE);
+            if (d == null) return false;
+            int vid = d.getVendorId();
+            return vid == 0x10C4 || vid == 0x0D8C || vid == 0x0C76;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /** USB topology changed: ask the active modem to re-open RX (v0.26). */
+    private void rebindModemAudio(String why) {
+        sessionDebug("RX rebind: " + why);
+        AudioModem m = modem;
+        OfdmModem o = ofdm;
+        MercuryModem h = mercury;
+        if (m != null) m.rebindAudio();
+        if (o != null) o.rebindAudio();
+        if (h != null) h.rebindAudio();
+    }
+
+    private void registerUsbPermReceiver() {
+        if (usbPermReceiver != null) return;
+        try {
+            usbPermReceiver = new android.content.BroadcastReceiver() {
+                @Override
+                public void onReceive(android.content.Context c,
+                                      android.content.Intent intent) {
+                    String action = intent.getAction();
+                    if (android.hardware.usb.UsbManager
+                            .ACTION_USB_DEVICE_ATTACHED.equals(action)) {
+                        // Hot-plug while running: re-open RX capture so it
+                        // follows the new device (v0.26), and engage PTT
+                        // when the attached device is a Digirig keyer.
+                        rebindModemAudio("USB attached");
+                        if (isPttDevice(intent)) {
+                            log("PTT: Digirig attached \u2014 engaging");
+                            mainHandler.post(HbcPlugin.this::engageUsbPtt);
+                        }
+                        return;
+                    }
+                    if (android.hardware.usb.UsbManager
+                            .ACTION_USB_DEVICE_DETACHED.equals(action)) {
+                        rebindModemAudio("USB detached");
+                        if (isPttDevice(intent))
+                            mainHandler.post(HbcPlugin.this::disengageUsbPtt);
+                        return;
+                    }
+                    boolean granted = intent.getBooleanExtra(
+                            android.hardware.usb.UsbManager.EXTRA_PERMISSION_GRANTED,
+                            false);
+                    if (granted) {
+                        log("PTT: USB permission granted");
+                        mainHandler.post(HbcPlugin.this::engageUsbPtt);
+                    } else {
+                        log("PTT: USB permission denied \u2014 RTS PTT stays off");
+                    }
+                }
+            };
+            android.content.IntentFilter f =
+                    new android.content.IntentFilter(UsbPtt.ACTION_USB_PERMISSION);
+            f.addAction(android.hardware.usb.UsbManager.ACTION_USB_DEVICE_ATTACHED);
+            f.addAction(android.hardware.usb.UsbManager.ACTION_USB_DEVICE_DETACHED);
+            android.content.Context ctx = usbContext();
+            if (android.os.Build.VERSION.SDK_INT >= 33)
+                ctx.registerReceiver(usbPermReceiver, f,
+                        android.content.Context.RECEIVER_NOT_EXPORTED);
+            else
+                ctx.registerReceiver(usbPermReceiver, f);
+        } catch (Throwable t) {
+            sessionDebug("PTT: permission receiver registration failed: " + t);
+            usbPermReceiver = null;
+        }
+    }
+
+    private void unregisterUsbPermReceiver() {
+        if (usbPermReceiver == null) return;
+        try {
+            usbContext().unregisterReceiver(usbPermReceiver);
+        } catch (Throwable ignored) {}
+        usbPermReceiver = null;
+    }
+
+    // ------------------------------------------------------------------
+    // v0.24 C2 Bridge: one-way RF -> LAN data diode
+    // ------------------------------------------------------------------
+    /** Live C2 Bridge state: checkbox when bound, saved pref otherwise. */
+    private boolean bridgeOn() {
+        CheckBox cb = cbC2Bridge;
+        return cb != null ? cb.isChecked()
+                : (prefs != null && prefs.getBoolean("c2_bridge", false));
+    }
+
+    /** Short human-readable row for the Push-to-RF dialog. */
+    private static String pushLabel(CotEvent event) {
+        String xml = event.toString();
+        String cs = BridgePolicy.firstAttr(xml, "<contact", "callsign");
+        if (cs == null)
+            cs = BridgePolicy.firstAttr(xml, "<link", "parent_callsign");
+        return event.getType()
+                + (cs != null ? " '" + cs + "'" : " " + event.getUID());
+    }
+
+    /**
+     * C2 Bridge: push one decoded radio event onto the normal ATAK
+     * network outputs (TAK server / mesh SA) so LAN users see it. The
+     * UID is remembered so the event can never echo back to RF through
+     * our own PreSendProcessor, and forwarded PLIs are re-rendered
+     * WITHOUT the chat endpoint — network users must not try to DM a
+     * station that can never hear them through a one-way bridge.
+     */
+    private void forwardToNetwork(HbcDecoder.Decoded dec, CotEvent event) {
+        try {
+            String uid = event.getUID();
+            if (uid != null)
+                synchronized (bridgedUids) {
+                    bridgedUids.put(uid, System.currentTimeMillis());
+                    pruneOld(bridgedUids, 600_000);
+                }
+            CotEvent out = event;
+            if (dec.mode == 1 && !dec.isSpot && !dec.suppressEndpoint) {
+                dec.suppressEndpoint = true;
+                CotEvent stripped = CotEvent.parse(dec.toXml());
+                dec.suppressEndpoint = false;
+                if (stripped != null && stripped.isValid())
+                    out = stripped;
+            }
+            CotMapComponent.getExternalDispatcher().dispatch(out);
+            log("Bridge: " + dec.summary() + " -> network");
+        } catch (Throwable t) {
+            sessionDebug("Bridge: forward failed: " + t);
+        }
+    }
+
+    /** C2 Bridge: multi-select dialog over the blocked-event stash. */
+    private void showPushRfDialog() {
+        final java.util.List<BridgePolicy.PushStash.Entry<CotEvent>> entries =
+                blockedForPush.list(System.currentTimeMillis());
+        if (entries.isEmpty()) {
+            toast(pluginContext.getString(R.string.hbc_push_rf_empty));
+            return;
+        }
+        if (!started || mesh == null) {
+            toast("Start the radio link first");
+            return;
+        }
+        android.content.Context dlgCtx;
+        try {
+            dlgCtx = com.atakmap.android.maps.MapView.getMapView().getContext();
+        } catch (Throwable t) {
+            dlgCtx = pluginContext;
+        }
+        long now = System.currentTimeMillis();
+        final String[] labels = new String[entries.size()];
+        final boolean[] checked = new boolean[entries.size()];
+        for (int i = 0; i < entries.size(); i++) {
+            long ageS = Math.max(0, (now - entries.get(i).atMs) / 1000);
+            labels[i] = entries.get(i).label
+                    + "  (" + (ageS / 60) + "m" + (ageS % 60) + "s ago)";
+        }
+        try {
+            new android.app.AlertDialog.Builder(dlgCtx)
+                    .setTitle(pluginContext.getString(R.string.hbc_push_rf_title))
+                    .setMultiChoiceItems(labels, checked,
+                            (d, which, isChecked) -> checked[which] = isChecked)
+                    .setPositiveButton("Send", (d, w) -> {
+                        int n = 0;
+                        for (int i = 0; i < entries.size(); i++) {
+                            if (!checked[i]) continue;
+                            BridgePolicy.PushStash.Entry<CotEvent> e =
+                                    blockedForPush.take(entries.get(i).uid,
+                                            System.currentTimeMillis());
+                            if (e != null && pushEventToRf(e.payload)) n++;
+                        }
+                        toast("Pushed " + n + " item" + (n == 1 ? "" : "s")
+                                + " to RF");
+                    })
+                    .setNegativeButton("Cancel", (d, w) -> d.dismiss())
+                    .show();
+        } catch (Throwable t) {
+            toast("Push dialog failed: " + t.getClass().getSimpleName());
+        }
+    }
+
+    /**
+     * One-shot manual LAN -> RF push — the deliberate operator exception
+     * to the diode. Encodes through the normal HBC path (same routing,
+     * ring queue and batching as native traffic).
+     */
+    private boolean pushEventToRf(CotEvent event) {
+        MeshRouter ms = mesh;
+        if (ms == null) return false;
+        try {
+            HbcEncoder.Encoded enc = HbcEncoder.encode(event.toString(), true);
+            if (enc.mode == 3 && enc.chatDestKind == 2
+                    && !enc.chatRecipient.isEmpty()) {
+                ms.sendDirect(meshDestFor(enc.chatRecipient), enc.bytes);
+            } else {
+                String sendTo = prefs.getString("send_to", "");
+                if (!sendTo.isEmpty())
+                    ms.sendDirect(sendTo, enc.bytes);
+                else
+                    ms.sendBroadcast(enc.bytes);
+            }
+            log("Bridge: manual push mode " + enc.mode + " ("
+                    + enc.bytes.length + " B) " + event.getType() + " -> RF");
+            if (enc.mode == 2 && ringMac != null)
+                ringMac.flagEmergency();
+            return true;
+        } catch (HbcEncoder.HbcEncodeException e) {
+            log("Bridge: push skip: " + e.getMessage());
+            return false;
+        } catch (Exception e) {
+            log("Bridge: push error: " + e);
+            return false;
+        }
     }
 
     /** RingMac's window into the plugin: channel state, roster, TX queue. */
@@ -1021,6 +1352,36 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
                         : (type.startsWith("a-f-G")
                            && event.getUID() != null
                            && event.getUID().startsWith("ANDROID-"));
+            }
+
+            // v0.24 C2 Bridge diode: while bridging, never AUTO-relay
+            // network-origin events to the radio. Radio-origin echoes
+            // (events we ourselves forwarded to the LAN) are dropped
+            // outright; anything else not authored on this device is
+            // stashed for the operator's "Push to RF" dialog.
+            if (bridgeOn()) {
+                String evUid = event.getUID();
+                boolean recentlyBridged;
+                synchronized (bridgedUids) {
+                    pruneOld(bridgedUids, 600_000);
+                    recentlyBridged = evUid != null
+                            && bridgedUids.containsKey(evUid);
+                }
+                String verdict = BridgePolicy.txVerdict(selfPli, evUid,
+                        BridgePolicy.extractAuthorUid(event.toString()),
+                        selfUid(), recentlyBridged);
+                if ("network-origin".equals(verdict)) {
+                    blockedForPush.put(evUid, pushLabel(event),
+                            System.currentTimeMillis(), event);
+                    log("Bridge: blocked " + type + " " + evUid
+                            + " (network-origin) \u2014 use Push to RF");
+                    return;
+                }
+                if (verdict != null) {
+                    sessionDebug("Bridge: dropped " + type + " " + evUid
+                            + " (" + verdict + ")");
+                    return;
+                }
             }
 
             if (!modeEnabled(type, selfPli)) {
@@ -1285,6 +1646,12 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
             logDecode(origin
                     + "\n  " + dec.summary()
                     + "\n  " + hbcPayload.length + " B payload");
+
+            // v0.24 C2 Bridge: re-publish the decoded radio event onto the
+            // normal ATAK network outputs so LAN users see it.
+            if (bridgeOn()
+                    && BridgePolicy.shouldForwardToLan(dec.mode, dec.chatDestKind))
+                forwardToNetwork(dec, event);
         } catch (Exception e) {
             sessionDebug("RX payload not HBC: " + e.getMessage());
         }
