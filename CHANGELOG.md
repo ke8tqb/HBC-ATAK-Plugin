@@ -4,6 +4,40 @@ All notable changes to HBC Audio Plugin are documented here.
 
 ---
 
+## [0.27] — Fix TX-queue starvation (stuck carrier sense) + PTT self-recovery + stall alarm
+
+Field findings from the 10-10 RF test: with the Digirig's hot RX line
+(open squelch / constant hiss) the carrier sense latched busy forever
+— the Ring MAC's own turn then expired by deadline every rotation and
+the TX queue NEVER transmitted. Separately, a CP210x keying write
+failed mid-session with no recovery.
+
+- **Carrier-sense re-baseline (CsmaSense).** A real transmission lasts
+  seconds; if "busy" persists longer than 10 s the loud level IS the
+  channel, so the noise floor now re-baselines toward it and busy
+  releases instead of latching forever. `reset()` added — every USB
+  RX rebind relearns the floor from scratch for the new device.
+- **Ring forced own-turn TX.** Mirror of CSMA's "busy > 8 s —
+  transmitting anyway": if our own turn was blocked by the busy
+  interlock for the whole Max turn + Guard window and frames are
+  queued, transmit at the deadline (`Ring: TX turn (…, forced —
+  channel busy all turn)`). The queue can no longer starve.
+- **PTT dead-keyer self-recovery.** A failed keying write (device
+  dropped/re-enumerated — the 10-10 `write failed (-1)`) now flags the
+  keyer dead once and automatically reopens the connection; open()
+  always releases the key line first, clearing a potentially stuck
+  transmitter. Un-key failures warn `verify the radio is NOT stuck
+  transmitting`. If reopen fails, replugging re-engages automatically
+  (hot-plug path unchanged).
+- **TX stall alarm.** A 1 s watchdog sums the ring queue + modem
+  queue; above 5 frames it raises `TX ISSUE: {n} frames stuck in the
+  TX queue …` (log + toast, at most every 30 s) in BOTH CSMA and Ring
+  modes.
+- Tests: RingMacTest T10 (forced own-turn TX under a permanently busy
+  channel); all five suites green.
+
+---
+
 ## [0.26] — Digirig Lite support + USB hot-plug audio recovery + USB TX level
 
 Field findings from the 10-09 RF test (Digirig Mobile now keys

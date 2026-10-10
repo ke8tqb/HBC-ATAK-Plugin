@@ -146,6 +146,13 @@ public class MercuryModem {
         rxRebindRequested = true;
     }
 
+    /** Frames waiting in the modem TX queue (v0.27 stall watchdog). */
+    public int queuedFrames() {
+        synchronized (txLock) {
+            return txQueue.size();
+        }
+    }
+
     public synchronized void start() throws Exception {
         if (running) return;
         synchronized (MercuryNative.class) {
@@ -471,6 +478,9 @@ public class MercuryModem {
                         return;
                     }
                     record.startRecording();
+                    // v0.27: new input device = new noise statistics —
+                    // relearn the carrier-sense floor from scratch
+                    csma.reset();
                     continue;
                 }
                 int nin;

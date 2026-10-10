@@ -213,6 +213,19 @@ public class RingMacTest {
         check("T9 measured cycle in range", cycle >= 1000 && cycle <= 3000);
         rm.stop();
 
+        // ---- T10: forced own-turn TX under a permanently busy channel
+        // (v0.27 — hot RX line / open squelch must not starve the queue)
+        reset();
+        rm = fresh("ALPHA");                   // alone => settled
+        busy = true;                           // carrier never clears
+        pending = 2;
+        step(rm, 6000);                        // within maxTurn: interlock holds
+        check("T10 interlock holds before deadline", released == 0);
+        step(rm, 2000);                        // past maxTurn+guard => forced
+        check("T10 forced TX at deadline", released == 2
+                && sawStatus("forced"));
+        rm.stop();
+
         System.out.println(failures == 0
                 ? "All RingMac tests PASSED"
                 : failures + " RingMac test(s) FAILED");

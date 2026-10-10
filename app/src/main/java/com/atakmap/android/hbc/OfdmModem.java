@@ -146,6 +146,13 @@ public class OfdmModem {
         rxRebindRequested = true;
     }
 
+    /** Frames waiting in the modem TX queue (v0.27 stall watchdog). */
+    public int queuedFrames() {
+        synchronized (txLock) {
+            return txQueue.size();
+        }
+    }
+
     public synchronized void start() throws Exception {
         if (running) return;
         if (!OfdmNative.createEncoder(SAMPLE_RATE))
@@ -469,6 +476,9 @@ public class OfdmModem {
                         return;
                     }
                     record.startRecording();
+                    // v0.27: new input device = new noise statistics —
+                    // relearn the carrier-sense floor from scratch
+                    csma.reset();
                     continue;
                 }
                 int n = record.read(pcm, 0, pcm.length);

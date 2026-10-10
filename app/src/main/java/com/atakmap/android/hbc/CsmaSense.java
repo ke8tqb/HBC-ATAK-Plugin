@@ -33,9 +33,24 @@ public final class CsmaSense {
     private static final double MIN_RMS = 150.0 / 32768.0;  // absolute busy threshold
     private static final int BUSY_HOLD_MS = 400;            // bridges in-signal gaps
 
+    // v0.27: a real transmission lasts seconds. If "busy" persists far
+    // longer, the loud level IS the channel (open squelch / hot Digirig RX
+    // line / constant interference) — re-baseline the floor toward it so
+    // carrier sense releases instead of latching busy forever (which
+    // starved the Ring MAC's own turn in the field).
+    private static final long BUSY_REBASELINE_MS = 10_000;
+
     private final Random random = new Random();
     private volatile long lastBusyMs = 0;
+    private volatile long busyEpisodeStartMs = 0;
     private volatile double noiseFloor = -1;
+
+    /** Forget the learned noise floor (RX device changed — v0.27). */
+    public void reset() {
+        noiseFloor = -1;
+        lastBusyMs = 0;
+        busyEpisodeStartMs = 0;
+    }
 
     /** Feed an RX audio chunk. Do NOT call while this station is transmitting. */
     public void feed(short[] pcm, int n) {
@@ -56,11 +71,22 @@ public final class CsmaSense {
             // channel got quieter — track down quickly so a floor seeded
             // during a burst cannot stay stuck high
             noiseFloor = 0.8 * floor + 0.2 * rms;
+            busyEpisodeStartMs = 0;
         } else if (rms > Math.max(MIN_RMS, floor * SNR_FACTOR)) {
-            lastBusyMs = System.currentTimeMillis();
+            long now = System.currentTimeMillis();
+            boolean continuing = now - lastBusyMs < BUSY_HOLD_MS * 2;
+            lastBusyMs = now;
+            if (!continuing || busyEpisodeStartMs == 0) {
+                busyEpisodeStartMs = now;
+            } else if (now - busyEpisodeStartMs > BUSY_REBASELINE_MS) {
+                // persistent "carrier": absorb it into the noise floor so
+                // isBusy() can release once the floor catches up
+                noiseFloor = 0.95 * floor + 0.05 * rms;
+            }
         } else {
             // ordinary quiet chunk: slow upward drift of the floor
             noiseFloor = 0.99 * floor + 0.01 * rms;
+            busyEpisodeStartMs = 0;
         }
     }
 

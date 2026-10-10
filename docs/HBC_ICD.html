@@ -666,6 +666,8 @@ plugin raises when the radio link starts in USB + RTS PTT mode.</div>
   <tr><td class="mono">Ring: {call} dormant (3 silent turns)</td><td>That station has not transmitted for 3 cycles; it keeps costing only the Skip time.</td></tr>
   <tr><td class="mono">Ring: emergency frame queued &mdash; preempting at next idle window / Ring: emergency TX ({x} frames, preempt)</td><td>A 911 alert jumped the turn order in an idle gap (the single allowed exception).</td></tr>
   <tr><td class="mono">Ring: TX queue {n} frames (~{t} s to drain)</td><td>More than 6 frames are waiting for this station&rsquo;s turns (estimate from the measured rotation time; logged at most every 30 s). If it persists, slow down chat/marker sends &mdash; see section 3.5&rsquo;s ARQ-interaction note.</td></tr>
+  <tr><td class="mono">Ring: TX turn ({i}/{n}, {x} frames, forced &mdash; channel busy all turn)</td><td>The busy interlock blocked this station&rsquo;s whole turn (open squelch, hot Digirig RX line, constant interference), so the batch transmitted at the deadline anyway &mdash; the Ring equivalent of CSMA&rsquo;s give-up override (0.27). Check radio RX volume/squelch if this repeats.</td></tr>
+  <tr><td class="mono">TX ISSUE: {n} frames stuck in the TX queue &mdash; …</td><td>Watchdog (0.27): more than 5 frames are waiting anywhere in the TX path and not draining; the channel reads permanently busy or the PTT/audio path failed. Logged with a toast at most every 30 s; Stop/Start recovers if it persists.</td></tr>
 </table>
 <p><b>C2 Bridge (section 2.1):</b></p>
 <table>
@@ -740,7 +742,7 @@ answers &ldquo;what have I actually received?&rdquo;</div>
   <tr><td>Cleanup interval</td><td>60 s</td><td>Mesh</td></tr>
   <tr><td>Direct retry timer</td><td>Armed when the frame airs (0.23). CSMA: 5 s + 0&ndash;2 s jitter; Ring: max(8 s, 1.25 &times; measured rotation), cap 60 s. Max 3 retries; stuck-queue fail 180 s</td><td>Mesh</td></tr>
   <tr><td>Quiet-time announce keepalive</td><td>10 min without own traffic</td><td>Mesh</td></tr>
-  <tr><td>CSMA busy threshold / hold</td><td>4&times; adaptive noise floor / 400 ms</td><td>PHY</td></tr>
+  <tr><td>CSMA busy threshold / hold</td><td>4&times; adaptive noise floor / 400 ms; busy persisting &gt; 10 s re-baselines the floor so a hot RX line cannot latch the channel busy (0.27)</td><td>PHY</td></tr>
   <tr><td>CSMA backoff / give-up</td><td>150&ndash;550 ms clear / 8 s (15 s Mercury)</td><td>PHY</td></tr>
   <tr><td>Ring Guard (VOX hang cover)</td><td>User setting, default 1500 ms (UV-5R / FT-65 profile)</td><td>MAC</td></tr>
   <tr><td>Ring Skip (silent-station timeout)</td><td>User setting, default 1200 ms</td><td>MAC</td></tr>

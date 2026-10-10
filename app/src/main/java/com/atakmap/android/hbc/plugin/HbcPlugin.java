@@ -424,9 +424,45 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
             @Override
             public void run() {
                 updatePliCountdown();
+                checkTxBacklog();
                 mainHandler.postDelayed(this, 1000);
             }
         });
+    }
+
+    // v0.27 TX stall watchdog: if more than 5 frames are waiting anywhere
+    // in the TX path (ring queue + modem queue), raise a visible error at
+    // most every 30 s — the queue silently never draining was a field
+    // finding (carrier sense latched busy by a hot Digirig RX line).
+    private long lastTxAlarmMs = 0;
+
+    private void checkTxBacklog() {
+        if (!started) {
+            lastTxAlarmMs = 0;
+            return;
+        }
+        int depth;
+        synchronized (ringPending) {
+            depth = ringPending.size();
+        }
+        AudioModem m = modem;
+        OfdmModem o = ofdm;
+        MercuryModem h = mercury;
+        if (m != null) depth += m.queuedFrames();
+        if (o != null) depth += o.queuedFrames();
+        if (h != null) depth += h.queuedFrames();
+        if (depth <= 5) {
+            if (depth == 0) lastTxAlarmMs = 0;
+            return;
+        }
+        long now = System.currentTimeMillis();
+        if (now - lastTxAlarmMs < 30_000) return;
+        lastTxAlarmMs = now;
+        log("TX ISSUE: " + depth + " frames stuck in the TX queue \u2014 "
+                + "channel reads busy or PTT/audio failed. Check RX "
+                + "volume/squelch and the PTT lines above; Stop/Start "
+                + "recovers if it persists");
+        toast("HBC: TX queue stuck (" + depth + " frames)");
     }
 
     private void updatePliCountdown() {
@@ -917,15 +953,16 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
     }
 
     /**
-     * Open the Digirig's CP210x and hand the keyer to the active modem.
-     * Safe to call repeatedly — no-ops once engaged. Called at Start and
-     * again from the USB-permission receiver when the user taps Allow.
+     * Open the Digirig's keyer and hand it to the active modem. Safe to
+     * call repeatedly — no-ops once engaged. Called at Start, from the
+     * USB-permission/attach receiver, and from the dead-keyer recovery.
      */
     private synchronized void engageUsbPtt() {
         if (usbPtt != null) return;
         if (prefs.getInt("tx_output", 0) != 1) return;
         if (modem == null && ofdm == null && mercury == null) return;
-        usbPtt = UsbPtt.open(usbContext(), this::log);
+        usbPtt = UsbPtt.open(usbContext(), this::log,
+                () -> mainHandler.post(this::recoverUsbPtt));
         if (usbPtt != null) {
             if (modem != null)   modem.setPtt(usbPtt);
             if (ofdm != null)    ofdm.setPtt(usbPtt);
@@ -934,6 +971,26 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
             log("PTT: TX audio uses the Media volume on USB \u2014 "
                     + "set Media volume to max");
         }
+    }
+
+    /**
+     * v0.27: a keying write failed mid-session (device dropped off the
+     * bus or re-enumerated). Tear the old connection down and try a
+     * fresh open — open() always releases the key line first, which
+     * also clears a potentially stuck transmitter.
+     */
+    private synchronized void recoverUsbPtt() {
+        if (usbPtt != null) {
+            usbPtt.close();
+            usbPtt = null;
+            if (modem != null)   modem.setPtt(null);
+            if (ofdm != null)    ofdm.setPtt(null);
+            if (mercury != null) mercury.setPtt(null);
+        }
+        engageUsbPtt();
+        if (usbPtt == null)
+            log("PTT: keyer not recovered \u2014 replug the Digirig "
+                    + "(PTT re-engages automatically on attach)");
     }
 
     /** Detach cleanup: drop the keyer so TX falls back cleanly. */

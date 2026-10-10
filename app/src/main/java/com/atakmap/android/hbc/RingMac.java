@@ -302,6 +302,26 @@ public final class RingMac {
 
         // 3. DEADLINE: hidden terminal / stuck owner / our own stuck TX.
         if (now - turnStartMs >= (long) maxTurnMs + guardMs) {
+            // v0.27: never starve our own queue. If this was OUR turn and
+            // the busy interlock blocked it the whole time (open squelch,
+            // hot RX line, constant interference), transmit anyway — the
+            // Ring equivalent of CSMA's "channel busy > 8 s, transmitting
+            // anyway" override.
+            if (mine && settled && !ownTurnFired && !hooks.transmitting()
+                    && hooks.pendingFrames() > 0) {
+                int n = hooks.releaseFrames(maxFramesPerTurn);
+                if (n > 0) {
+                    hooks.onStatus("Ring: TX turn (" + (turnIdx + 1) + "/"
+                            + roster.size() + ", " + n + " frame"
+                            + (n == 1 ? "" : "s")
+                            + ", forced \u2014 channel busy all turn)");
+                    ownTurnFired = true;
+                    ownerKeyed = true;
+                    clearSinceMs = 0;
+                    turnStartMs = now;   // give the burst its own window
+                    return;
+                }
+            }
             hooks.onDebug("Ring: deadline advance past " + owner);
             advance(now, null);
         }

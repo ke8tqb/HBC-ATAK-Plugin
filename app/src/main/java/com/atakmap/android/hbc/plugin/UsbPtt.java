@@ -66,16 +66,18 @@ final class UsbPtt implements PttKeyer {
     private final UsbInterface iface;
     private final Status status;
     private final int kind;
+    private final Runnable onDead;
     final String name;
-    private boolean warnedKeyFail = false;
+    private boolean dead = false;
 
     private UsbPtt(UsbDeviceConnection conn, UsbInterface iface, String name,
-                   Status status, int kind) {
+                   Status status, int kind, Runnable onDead) {
         this.conn = conn;
         this.iface = iface;
         this.name = name;
         this.status = status;
         this.kind = kind;
+        this.onDead = onDead;
     }
 
     /**
@@ -85,7 +87,7 @@ final class UsbPtt implements PttKeyer {
      * after granting), or the open fails. The caller falls back to
      * plain speaker/VOX behavior on null.
      */
-    static UsbPtt open(Context ctx, Status status) {
+    static UsbPtt open(Context ctx, Status status, Runnable onDead) {
         try {
             UsbManager um = (UsbManager) ctx.getSystemService(Context.USB_SERVICE);
             if (um == null) {
@@ -193,7 +195,7 @@ final class UsbPtt implements PttKeyer {
             status.log(kind == KIND_CP210X
                     ? "PTT: USB RTS ready (" + nm + ")"
                     : "PTT: USB GPIO ready (" + nm + ")");
-            return new UsbPtt(c, target, nm, status, kind);
+            return new UsbPtt(c, target, nm, status, kind, onDead);
         } catch (Throwable t) {
             status.log("PTT: USB PTT init failed: " + t);
             return null;
@@ -210,18 +212,27 @@ final class UsbPtt implements PttKeyer {
 
     @Override
     public synchronized void key(boolean tx) {
+        if (dead) return;
+        int r;
         try {
-            int r = kind == KIND_CM108
+            r = kind == KIND_CM108
                     ? cm108Gpio(conn, iface.getId(), tx)
                     : conn.controlTransfer(REQTYPE_HOST_TO_DEVICE, CP210X_SET_MHS,
                             tx ? MHS_RTS_ON : MHS_RTS_OFF, 0, null, 0, 200);
-            if (r < 0 && !warnedKeyFail) {
-                warnedKeyFail = true;
-                status.log("PTT: keying write failed (" + r
-                        + ") \u2014 reconnect the Digirig and Stop/Start");
+        } catch (Throwable t) {
+            r = -1;
+        }
+        if (r < 0) {
+            // The device dropped off the bus (or re-enumerated). Flag it
+            // ONCE and let the plugin reopen a fresh connection — a failed
+            // UNKEY otherwise risks a stuck transmitter.
+            dead = true;
+            status.log("PTT: keying write failed \u2014 reopening the Digirig "
+                    + "connection" + (tx ? "" :
+                    " (verify the radio is NOT stuck transmitting)"));
+            if (onDead != null) {
+                try { onDead.run(); } catch (Throwable ignored) {}
             }
-        } catch (Throwable ignored) {
-            // keying failure surfaces as the radio simply not transmitting
         }
     }
 
