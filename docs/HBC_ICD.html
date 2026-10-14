@@ -35,7 +35,7 @@
   <h1>HBC RADIO</h1>
   <div class="sub">ATAK Plugin &mdash; Interface Control Document</div>
   <div class="sub">Ham Binary CoT over Distance-Vector Mesh Radio</div>
-  <div class="contact">Version 1.7 &nbsp;|&nbsp; KE8TQB &nbsp;|&nbsp; github.com/ke8tqb/HBC-ATAK-Plugin</div>
+  <div class="contact">Version 1.8 &nbsp;|&nbsp; KE8TQB &nbsp;|&nbsp; github.com/ke8tqb/HBC-ATAK-Plugin</div>
 </div>
 
 <div class="toc">
@@ -52,8 +52,9 @@
       <li>3.1 &nbsp;AFSK1200 / AX.25</li>
       <li>3.2 &nbsp;OFDM COFDMTV (rattlegram)</li>
       <li>3.3 &nbsp;Mercury HF (FreeDV DATAC4)</li>
-      <li>3.4 &nbsp;Channel Access &mdash; CSMA (legacy contention)</li>
-      <li>3.5 &nbsp;Channel Access &mdash; Ring MAC (deterministic rotation)</li>
+      <li>3.4 &nbsp;PSK31 (BPSK31 with text armor)</li>
+      <li>3.5 &nbsp;Channel Access &mdash; CSMA (contention)</li>
+      <li>3.6 &nbsp;Channel Access &mdash; Ring MAC (deterministic rotation)</li>
     </ol>
   </li>
   <li>Mesh Network Layer
@@ -93,6 +94,14 @@
   <li>References</li>
 </ol>
 <p>Appendix A &mdash; GitHub Repository File Structure</p>
+<h2>Revision History</h2>
+<table>
+  <tr><th>ICD rev</th><th>Date</th><th>Summary of changes</th></tr>
+  <tr><td>1.8</td><td>Oct 2026</td><td>Added the PSK31 modem (section 3.4), its airtime-scaled channel-access values throughout, and the new modem-selector figure. Document made fully self-contained: feature history is consolidated here instead of inline version notes.</td></tr>
+  <tr><td>1.7</td><td>Oct 2026</td><td>Added the TX output / hardware-PTT selector (Digirig RTS and GPIO keying), USB hot-plug receive recovery and USB TX-level guidance; refreshed the full screenshot set.</td></tr>
+  <tr><td>1.6</td><td>Oct 2026</td><td>Added the C2 Bridge one-way RF &rarr; network data diode (section 2.1) and its Push to RF workflow.</td></tr>
+  <tr><td>1.0&ndash;1.5</td><td>Sep&ndash;Oct 2026</td><td>Initial document: three-layer architecture, the first three modems, the mesh network layer, the Ring MAC, ARQ refinements and the UI reference.</td></tr>
+</table>
 </div>
 
 <h2>1. Overview</h2>
@@ -104,7 +113,7 @@ radio and turns it back into map data.</p>
 <p>The system is built in three layers, like a stack of responsibilities. Each layer is
 specified in its own section of this document:</p>
 <ul>
-  <li><b>Physical layer (Section 3)</b> — the &ldquo;voice&rdquo; of the system: one of three
+  <li><b>Physical layer (Section 3)</b> — the &ldquo;voice&rdquo; of the system: one of four
       selectable audio modems that turn bytes into sound and back.</li>
   <li><b>Mesh network layer (Section 4)</b> — the &ldquo;postal service&rdquo;: it figures out
       who can hear whom and can pass a message through a middle station to reach someone out
@@ -131,10 +140,10 @@ forward it toward its destination, rebroadcast it (announces), or ignore it.</p>
   <tr><th>Layer</th><th>Code that implements it</th><th>How things are addressed</th></tr>
   <tr><td>Application</td><td>HbcEncoder / HbcDecoder</td><td>Callsign inside the HBC header; predictable UIDs (section 5.3)</td></tr>
   <tr><td>Network</td><td>MeshRouter</td><td>Origin / Transmitter / Destination / Next-hop callsigns</td></tr>
-  <tr><td>Physical</td><td>AudioModem, OfdmModem, MercuryModem</td><td>None &mdash; just a byte pipe (AFSK adds a fixed AX.25 wrapper for station ID)</td></tr>
+  <tr><td>Physical</td><td>AudioModem, OfdmModem, MercuryModem, Psk31Modem</td><td>None &mdash; just a byte pipe (AFSK adds a fixed AX.25 wrapper for station ID)</td></tr>
 </table>
 
-<h3>2.1 C2 Bridge &mdash; One-Way RF &rarr; Network Data Diode (plugin 0.24)</h3>
+<h3>2.1 C2 Bridge &mdash; One-Way RF &rarr; Network Data Diode</h3>
 <p>A station that hears the radio mesh AND sits on a normal ATAK network at the same time
 (WiFi mesh SA or a TAK server connection) can act as a <b>C2 Bridge</b>: a command-post
 gateway that pushes the radio picture onto the network without ever letting network-volume
@@ -163,17 +172,17 @@ only transmissions are initiated by the control operator&rsquo;s own station, au
 for its own data or deliberately via Push to RF.</div>
 
 <h2>3. Physical Layer (Audio Modems)</h2>
-<p>A modem converts bytes into sound and sound back into bytes. HBC Radio offers three, each
-suited to different radios and conditions. All three carry the exact same mesh frame, but
+<p>A modem converts bytes into sound and sound back into bytes. HBC Radio offers four, each
+suited to different radios and conditions. All four carry the exact same mesh frame, but
 they are not compatible with each other &mdash; <b>every station on a channel must select
 the same modem</b> (Figure 3).</p>
 <table>
-  <tr><th>Parameter</th><th>AFSK1200</th><th>OFDM COFDMTV</th><th>Mercury HF</th></tr>
-  <tr><td>Waveform</td><td>Bell 202 AFSK, 1200 baud</td><td>QPSK OFDM (rattlegram &ldquo;short&rdquo;), 1600 Hz BW</td><td>FreeDV DATAC4 raw-data OFDM (codec2)</td></tr>
-  <tr><td>Sample rate</td><td>48000 Hz</td><td>48000 Hz</td><td>8000 Hz</td></tr>
-  <tr><td>Payload capacity per burst</td><td>Practical AX.25 limits (&gt;200 B)</td><td>169 B</td><td>52 B (54 B frame minus framing)</td></tr>
-  <tr><td>Error protection</td><td>HDLC CRC-16 (detect only)</td><td>Polar code + CRC-32</td><td>LDPC + CRC-16</td></tr>
-  <tr><td>Best for</td><td>VHF/UHF FM; compatible with classic packet radio</td><td>VHF/UHF FM; survives phone audio processing</td><td>HF SSB; works at very weak signal levels</td></tr>
+  <tr><th>Parameter</th><th>AFSK1200</th><th>OFDM COFDMTV</th><th>Mercury HF</th><th>PSK31</th></tr>
+  <tr><td>Waveform</td><td>Bell 202 AFSK, 1200 baud</td><td>QPSK OFDM (rattlegram &ldquo;short&rdquo;), 1600 Hz BW</td><td>FreeDV DATAC4 raw-data OFDM (codec2)</td><td>BPSK 31.25 Bd (PSK31 Varicode), ~31 Hz BW</td></tr>
+  <tr><td>Sample rate</td><td>48000 Hz</td><td>48000 Hz</td><td>8000 Hz</td><td>8000 Hz</td></tr>
+  <tr><td>Payload capacity per burst</td><td>Practical AX.25 limits (&gt;200 B)</td><td>169 B</td><td>52 B (54 B frame minus framing)</td><td>180 B (one frame per burst)</td></tr>
+  <tr><td>Error protection</td><td>HDLC CRC-16 (detect only)</td><td>Polar code + CRC-32</td><td>LDPC + CRC-16</td><td>CRC-16/X.25 on the armored frame (detect only)</td></tr>
+  <tr><td>Best for</td><td>VHF/UHF FM; compatible with classic packet radio</td><td>VHF/UHF FM; survives phone audio processing</td><td>HF SSB; works at very weak signal levels</td><td>Any voice channel incl. HF SSB; extreme weak signal; very slow</td></tr>
 </table>
 
 <h3>3.1 AFSK1200 / AX.25</h3>
@@ -201,33 +210,61 @@ that says &ldquo;this is HBC traffic&rdquo;), bytes 2..n = the mesh frame, zero-
 Mercury&rsquo;s higher-level ARQ data-link protocol. A desktop Mercury installation can
 demodulate these bursts but will not pass them to its TCP data port.</div>
 
-<h3>3.4 Channel Access &mdash; CSMA (legacy contention)</h3>
+<h3>3.4 PSK31 (BPSK31 with text armor)</h3>
+<p>The narrowest and slowest modem: 31.25-baud binary phase-shift keying with the ITU-R
+M.2034 Varicode alphabet &mdash; the same waveform human operators use for
+keyboard-to-keyboard PSK31 contacts. Audio carrier 1500 Hz, sample rate 8000 Hz, occupied
+bandwidth about 31 Hz: it drops into any SSB voice channel alongside human PSK31 signals
+and keeps decoding at signal-to-noise ratios where even the OFDM modes fail. The price is
+airtime &mdash; roughly 0.4 s per byte plus ~4 s of preamble/postamble: a position report is
+~16 s of continuous audio, a full extended marker ~30 s, and the largest accepted frame
+(180 bytes) ~77 s.</p>
+<p>Varicode itself carries no error detection, so binary mesh frames ride inside a text
+<i>armor</i>: <code>~</code> + Base64(mesh frame + CRC-16/X.25) + <code>~</code>. The
+receiver ignores anything on frequency that is not a well-formed armored frame (human PSK31
+chatter, noise), and the CRC rejects corrupted frames outright &mdash; a damaged frame is
+dropped, never delivered wrong. The VOX leader is a steady carrier tone (an idle PSK31
+carrier): it trips VOX radios and decodes as nothing.</p>
+<div class="note"><b>Channel access at PSK31 speeds:</b> every channel-access time constant
+scales with this modem&rsquo;s airtime. The Ring MAC sizes its turn deadline from the
+worst-case frame airtime (~94 s) and releases exactly <b>one frame per turn</b>; CSMA waits
+up to 90 s &mdash; longer than the longest possible neighbor burst &mdash; before its
+give-up override; the carrier-sense re-baseline window is likewise 90 s, so a
+neighbor&rsquo;s long continuous carrier is never mistaken for a stuck-open squelch; and the
+position-report floor is 25 s per roster station (section 3.6). Expect a deliberately slow
+reporting cadence &mdash; PSK31 trades speed for reach.</div>
+<div class="plain"><b>Operating guidance:</b> with three or more stations, run the Ring MAC
+(section 3.6). At these burst lengths a single collision wastes 30 s or more of channel
+time; the ring&rsquo;s collision probability is zero by construction, while CSMA&rsquo;s
+grows with burst duration.</div>
+
+<h3>3.5 Channel Access &mdash; CSMA (contention)</h3>
 <p>Only one station can talk on a radio channel at a time; two at once garble both
-(a &ldquo;collision&rdquo;). In CSMA mode (the default and the only mode before plugin 0.22),
+(a &ldquo;collision&rdquo;). In CSMA mode (the default),
 every modem <i>listens first</i>: incoming
 audio energy is compared against an automatically learned background-noise level, and the
 channel counts as busy when audio is 4&times; louder than that background (held for 400 ms
 past the last loud moment so brief gaps inside someone&rsquo;s transmission don&rsquo;t look
 like free air). When the channel goes quiet, the station still waits a random 150&ndash;550 ms
 &mdash; so two stations that were both waiting don&rsquo;t key up at the same instant. After
-8 seconds of continuous busy (15 s on Mercury) the frame is sent anyway so traffic can never
-be blocked forever. AFSK also uses its demodulator&rsquo;s data-carrier-detect as a second
-&ldquo;someone is talking&rdquo; signal.</p>
+8 seconds of continuous busy (15 s on Mercury, 90 s on PSK31) the frame is sent anyway so
+traffic can never be blocked forever. AFSK also uses its demodulator&rsquo;s
+data-carrier-detect as a second &ldquo;someone is talking&rdquo; signal.</p>
 <div class="note"><b>When to use which:</b> CSMA is fine for 2&ndash;5 stations. It cannot
 see <i>hidden terminals</i> (two stations that cannot hear each other but both reach a
 third), and with VOX radios every frame pays the radio&rsquo;s full key-up/hang cycle &mdash;
-so with many stations, collisions and dead air grow. For nets up to ~20 stations, select
-the <b>Ring MAC</b> (section 3.5) on every station instead.</div>
+so with many stations, collisions and dead air grow. For nets up to ~20 stations &mdash;
+or PSK31 nets of 3 or more (section 3.4) &mdash; select the <b>Ring MAC</b> (section 3.6)
+on every station instead.</div>
 
-<h3>3.5 Channel Access &mdash; Ring MAC (deterministic rotation)</h3>
-<p>New in plugin 0.22. Instead of competing for the channel, stations take <b>turns in a
+<h3>3.6 Channel Access &mdash; Ring MAC (deterministic rotation)</h3>
+<p>Instead of competing for the channel, stations take <b>turns in a
 fixed, known order</b>: every station sorts the callsigns it knows about (its own plus the
 mesh address book of section 4.7, which fills itself just by listening) and rotates through
 that list. The list IS the schedule &mdash; there is no coordinator station, no
 &ldquo;token&rdquo; packet, and <b>no change to anything transmitted on the air</b>: the MAC
-only decides <i>when</i> a station may key up, never what the bytes look like. 0.21 and
-0.22 stations therefore interoperate; a CSMA station in a Ring net is simply heard as
-carrier and deferred to.</p>
+only decides <i>when</i> a station may key up, never what the bytes look like. A CSMA
+station in a Ring net is simply heard as carrier and deferred to.</p>
 <p>A station transmits only during its own turn &mdash; and then sends <b>everything it has
 queued as one continuous keying</b> (one batch: single lead-in, frames back-to-back, single
 tail), so the radio&rsquo;s VOX hang is paid once per turn instead of once per frame. Every
@@ -250,7 +287,7 @@ transmit in the next idle gap between turns after a short random delay.</p>
   <tr><th>Setting (Audio Setup tab)</th><th>Default</th><th>What it covers</th></tr>
   <tr><td>Guard ms</td><td>1500</td><td>The radio&rsquo;s VOX hang after audio stops, plus margin</td></tr>
   <tr><td>Skip ms</td><td>1200</td><td>VOX attack (~250 ms) + time to detect the carrier before declaring a station silent</td></tr>
-  <tr><td>Max turn ms</td><td>0 = automatic per modem (AFSK 6000, OFDM ~4400, Mercury ~6000)</td><td>The longest allowed batch; also the deadline timer</td></tr>
+  <tr><td>Max turn ms</td><td>0 = automatic per modem (AFSK 6000, OFDM ~4400, Mercury ~6000, PSK31 ~94000 &mdash; sized from the worst-case frame airtime)</td><td>The longest allowed batch; also the deadline timer</td></tr>
 </table>
 <div class="note"><b>Radio profile &mdash; Baofeng UV-5R and Yaesu FT-65 (reference
 radios):</b> neither radio&rsquo;s VOX hang is adjustable &mdash; the FT-65&rsquo;s VOX menu
@@ -259,41 +296,43 @@ exposes only VOX <i>sensitivity</i> 1&ndash;10 &mdash; and both hold the transmi
 roughly 1.0&ndash;1.5 s after audio stops. The 1500 ms Guard default covers that worst
 case. Their VOX attack also clips the first ~150&ndash;250 ms of audio, so set
 <b>VOX Lead = 250 ms</b> when driving these radios. Both radios&rsquo; time-out timers
-(&ge;60 s) are far above the longest turn &mdash; no interaction. With a Digirig-class USB
-interface, select <b>TX output = USB + RTS PTT</b> (0.25) instead: the plugin keys the
-radio electrically, VOX is out of the picture entirely, and Guard 300&ndash;500 ms /
-VOX Lead 0 apply.</div>
+(&ge;60 s) are far above the longest turn on the fast modems &mdash; no interaction (on
+PSK31, whose bursts can exceed 60 s, disable or maximize the radio&rsquo;s time-out timer).
+With a Digirig-class USB interface, select <b>TX output = USB + RTS PTT</b> instead: the
+plugin keys the radio electrically, VOX is out of the picture entirely, and Guard
+300&ndash;500 ms / VOX Lead 0 apply.</div>
 <div class="plain"><b>Calibrating Guard:</b> run a two-station session, key one radio with
 a short test transmission, and read the session log&rsquo;s receive timing (the gap between
 the end of decoded audio and the next burst, or the AFSK RX burst lines) to measure how
 long the carrier outlives the audio. Set Guard = the worst measured hang among all radios
 in the net + 150 ms. Every station must use the same Guard, Skip and modem.</div>
 <p><b>Capacity</b> (20 stations, 5 of them with traffic in a given cycle, defaults):
-AFSK &asymp; 32 s per full rotation, OFDM &asymp; 35 s, Mercury &asymp; 54 s. So that
-position reports never dominate the rotation, Ring mode automatically floors the PLI
-interval at <code>roster &times; 8 s</code> (<code>&times; 13 s</code> on Mercury), even if
-the user&rsquo;s &ldquo;PLI min s&rdquo; is set lower &mdash; that keeps PLIs at roughly a
-quarter of each station&rsquo;s turn capacity, leaving the rest for chat, ACKs and relays
-(raised from &times; 6 s / &times; 10 s in 0.23 after field testing).</p>
-<div class="note"><b>ARQ interaction (plugin 0.23):</b> the mesh layer&rsquo;s delivery
-retries (section 4.9) are aware of the Ring MAC. A 3-station field test on 0.22 showed the
-CSMA-era 5 s retry timer firing while the original Direct was still waiting for its turn:
-every chat message went to air up to 4 times, 20 of 23 Directs were declared failed even
-though they arrived, and TX queues peaked at ~21 frames (~4 minutes of backlog). Since
-0.23: (1) a pending Direct&rsquo;s retry clock only starts once its latest copy actually
-<i>airs</i>; (2) under Ring the retry interval scales to at least 1.25&times; the measured
-rotation time (an ACK cannot physically return sooner than the recipient&rsquo;s own turn);
-(3) chat delivered/read receipts travel as unacknowledged Directs; (4) a queued position
-report is replaced in place when a fresher one arrives; and (5) a persistent backlog is
-called out in the Activity Log (<code>Ring: TX queue&hellip;</code>). Raising <b>Max
-turn</b> (identically on every station) now also raises how many frames fit in one batch,
-so operators can trade longer turns for faster queue drain.</div>
+AFSK &asymp; 32 s per full rotation, OFDM &asymp; 35 s, Mercury &asymp; 54 s. PSK31 is in
+a different class &mdash; a single position report is ~16 s of audio, so even a 5-talker
+cycle runs several minutes (section 3.4). So that position reports never dominate the
+rotation, Ring mode automatically floors the PLI interval at <code>roster &times; 8 s</code>
+(<code>&times; 13 s</code> on Mercury, <code>&times; 25 s</code> on PSK31), even if the
+user&rsquo;s &ldquo;PLI min s&rdquo; is set lower &mdash; that keeps PLIs at roughly a
+quarter of each station&rsquo;s turn capacity (about 60% on PSK31), leaving the rest for
+chat, ACKs and relays.</p>
+<div class="note"><b>ARQ interaction:</b> the mesh layer&rsquo;s delivery retries
+(section 4.9) are aware of the Ring MAC &mdash; a retry timer tuned for contention access
+would otherwise fire while the original Direct was still waiting for its turn, duplicating
+traffic and flooding the queue: (1) a pending Direct&rsquo;s retry clock only starts once
+its latest copy actually <i>airs</i>; (2) under Ring the retry interval scales to at least
+1.25&times; the measured rotation time (an ACK cannot physically return sooner than the
+recipient&rsquo;s own turn); (3) chat delivered/read receipts travel as unacknowledged
+Directs; (4) a queued position report is replaced in place when a fresher one arrives; and
+(5) a persistent backlog is called out in the Activity Log
+(<code>Ring: TX queue&hellip;</code>). Raising <b>Max turn</b> (identically on every
+station) also raises how many frames fit in one batch, so operators can trade longer turns
+for faster queue drain.</div>
 <div class="note"><b>Design notes (why not the alternatives):</b> REQUEST/GRANT schemes,
 RTS/CTS and explicit token packets all cost full modem bursts per exchange &mdash; on OFDM
-every burst is ~1.84 s and on Mercury ~5.6 s regardless of payload size, so control
-traffic is as expensive as data. A coordinator is also a single point of failure. Slotted
-TDMA wastes the slot remainder on short messages. The ring keeps the determinism of
-TDMA/token designs with none of their airtime overhead.</div>
+every burst is ~1.84 s, on Mercury ~5.6 s, and on PSK31 tens of seconds regardless of
+payload size, so control traffic is as expensive as data. A coordinator is also a single
+point of failure. Slotted TDMA wastes the slot remainder on short messages. The ring keeps
+the determinism of TDMA/token designs with none of their airtime overhead.</div>
 
 <div class="pagebreak"></div>
 <h2>4. Mesh Network Layer</h2>
@@ -405,7 +444,7 @@ twice) &mdash; that covers the case where the first ACK was lost on the air.</p>
 <p>Directs work &ldquo;fire and wait&rdquo;: the originator keeps the message until the
 destination&rsquo;s ACK arrives, re-sending it <b>with the same Sequence ID</b> up to
 3 times, then declaring it failed and logging it. Broadcasts are never acknowledged or
-retried. Two refinements (plugin 0.23) let this ARQ coexist with the Ring MAC:</p>
+retried. Two refinements let this ARQ coexist with a queueing MAC (the Ring):</p>
 <ul>
   <li><b>The retry clock starts when the frame airs, not when it is queued.</b> Under the
       Ring MAC a frame can wait many seconds for this station&rsquo;s turn; retrying while
@@ -416,8 +455,8 @@ retried. Two refinements (plugin 0.23) let this ARQ coexist with the Ring MAC:</
       (minimum 8 s, capped at 60 s) &mdash; an ACK cannot return before the recipient&rsquo;s
       own turn comes around, so earlier retries are pure overhead.</li>
 </ul>
-<p>Chat delivered/read receipts (section 5.4) are sent as <b>unacknowledged Directs</b>
-(0.23): identical on the wire, but with no retries and no failure verdict &mdash; a lost
+<p>Chat delivered/read receipts (section 5.4) are sent as <b>unacknowledged Directs</b>:
+identical on the wire, but with no retries and no failure verdict &mdash; a lost
 checkmark does not justify retry traffic. The recipient still answers with a mesh ACK,
 which the origin simply ignores.</p>
 
@@ -472,8 +511,8 @@ recipient&rsquo;s ATAK automatically generates its delivered/read receipts, the 
 converts them into tiny Mode 0 Acks that echo the tag back over the air; the sender matches
 the tag to the original messageId and injects the receipt, so ATAK&rsquo;s familiar
 delivered/read checkmarks work end-to-end over radio. These application-level receipts are
-separate from (and in addition to) the mesh-layer ACKs of section 4.6. Since 0.23 they are
-carried as unacknowledged Directs (section 4.9) &mdash; best-effort by design.</p>
+separate from (and in addition to) the mesh-layer ACKs of section 4.6. They are carried as
+unacknowledged Directs (section 4.9) &mdash; best-effort by design.</p>
 
 <h3>5.5 Contact Publication</h3>
 <p>ATAK only lists a station in its chat/contact pickers when that station&rsquo;s position
@@ -490,7 +529,7 @@ Tools menu (Figure 1). This section shows each screen (6.1), explains every cont
 and toolbar icon (6.3), and teaches how to read the two logs (6.4, 6.5). Red boxes and
 numbered markers in the figures point at the controls each caption describes.</p>
 <h3>6.1 Screen-by-Screen Figures</h3>
-<p>All figures show the 0.26 pane: three tabs (<b>Audio Setup</b>, <b>Options</b>,
+<p>All figures show the plugin pane: three tabs (<b>Audio Setup</b>, <b>Options</b>,
 <b>Decodes</b>) under a slim always-visible header carrying the colored status line,
 the build stamp and the Start/Stop button.</p>
 
@@ -510,10 +549,11 @@ the build stamp and the Start/Stop button.</p>
 </div>
 
 <div class="figure">
-  <img src="images/v026_fig03_modem_select.jpg" alt="Modem selector expanded">
+  <img src="images/v029_fig03_modem_select.jpg" alt="Modem selector expanded showing all four modems">
   <div class="cap">Figure 3 &mdash; The modem selector expanded (section 3): OFDM
-  (Rattlegram, the default), Mercury, and AX.25/APRS. All stations on a channel must
-  choose the same modem.</div>
+  (Rattlegram, the default), Mercury, AX.25/APRS, and PSK31 &mdash; whose entry carries its
+  speed warning right in the label (<i>very slow &mdash; PLI &asymp;15 s on air</i>,
+  section 3.4). All stations on a channel must choose the same modem.</div>
 </div>
 
 <div class="figure">
@@ -527,7 +567,7 @@ the build stamp and the Start/Stop button.</p>
   <img src="images/v026_fig05_tx_output.jpg" alt="TX output / PTT selector expanded">
   <div class="cap">Figure 5 &mdash; TX output / PTT expanded (boxed): Speaker &mdash;
   VOX / acoustic coupling (default), or USB + RTS PTT for Digirig-class interfaces,
-  where the plugin keys the radio electrically (sections 6.2 and 3.5).</div>
+  where the plugin keys the radio electrically (sections 6.2 and 3.6).</div>
 </div>
 
 <div class="figure">
@@ -535,13 +575,13 @@ the build stamp and the Start/Stop button.</p>
   <div class="cap">Figure 6 &mdash; Audio Setup, lower half. &#9312; AFSK TX level %
   (AX.25 modem only); &#9313; TX Dwell and VOX Lead; &#9314; Channel access selector
   with the &#9432; UV-5R / FT-65 defaults link (boxed) that opens the radio-profile
-  dialog (section 3.5).</div>
+  dialog (section 3.6).</div>
 </div>
 
 <div class="figure">
   <img src="images/v026_fig07_channel_access.jpg" alt="Channel access selector expanded">
-  <div class="cap">Figure 7 &mdash; Channel access expanded: CSMA (legacy contention,
-  section 3.4) or Ring (deterministic turns, section 3.5), with the Guard / Skip /
+  <div class="cap">Figure 7 &mdash; Channel access expanded: CSMA (contention,
+  section 3.5) or Ring (deterministic turns, section 3.6), with the Guard / Skip /
   Max-turn fields beneath (boxed).</div>
 </div>
 
@@ -591,7 +631,7 @@ the build stamp and the Start/Stop button.</p>
 </div>
 
 <h3>6.2 Every Control and What It Does</h3>
-<p>Grouped by where each control lives in the 0.26 pane:</p>
+<p>Grouped by where each control lives in the pane:</p>
 <table>
   <tr><th>Control</th><th>Type</th><th>What it does</th></tr>
   <tr><td>Audio Setup / Options / Decodes</td><td>Tab buttons</td><td>Switch screens; the active tab&rsquo;s button is grayed out. <b>Decodes</b> opens as a full-panel page (header and tab bar hidden) with its own &#9664; Back button returning to the last settings tab.</td></tr>
@@ -602,12 +642,12 @@ the build stamp and the Start/Stop button.</p>
   <tr><td>TX Dwell ms</td><td>Number field</td><td>AFSK only: length of the HDLC flag preamble sent before data so the receiving modem can sync. Default 500. Increase if receivers miss the start of packets.</td></tr>
   <tr><td>VOX Lead ms</td><td>Number field</td><td>Warm-up audio played before data so a VOX-keyed radio has time to key up. Default 0 (use 0 with a hardwired PTT interface). Increase if the first part of transmissions is cut off.</td></tr>
   <tr><td>PLI min s</td><td>Number field</td><td>Minimum seconds between your own position reports (rate limit). Default 60. Drives the &ldquo;Next PLI&rdquo; countdown.</td></tr>
-  <tr><td>Modem</td><td>Dropdown</td><td>Which of the three waveforms to use (section 3). Listed OFDM (Rattlegram), Mercury, AX.25/APRS; <b>OFDM is the default</b>. Must match on every station.</td></tr>
+  <tr><td>Modem</td><td>Dropdown</td><td>Which of the four waveforms to use (section 3). Listed OFDM (Rattlegram), Mercury, AX.25/APRS, PSK31 (very slow &mdash; PLI &asymp;15 s on air); <b>OFDM is the default</b>. Must match on every station.</td></tr>
   <tr><td>TX audio stream</td><td>Dropdown</td><td>Which Android audio channel carries the transmit tones (Figure 4). Default Alarm; try the others only if your device distorts the tones.</td></tr>
-  <tr><td>TX output / PTT</td><td>Dropdown</td><td>Where transmit audio goes and how the radio is keyed (0.25). <b>Speaker &mdash; VOX / acoustic</b> (default): audio plays from the phone speaker into the radio&rsquo;s mic and the radio&rsquo;s VOX (or a finger on PTT) keys the transmitter; TX audio is now explicitly pinned to the speaker even when a USB interface is attached. <b>USB + RTS PTT (Digirig)</b>: TX audio is routed to the USB audio interface on the MEDIA stream (set Media volume to max &mdash; 0.26) and the plugin keys the radio electrically 60 ms before each burst: CP210x serial RTS on the Digirig Mobile, CM108 GPIO on the Digirig Lite (0.26) &mdash; no VOX attack or hang, so Guard 300&ndash;500 ms and VOX Lead 0 apply (&#9432; dialog). Requires a one-time Android USB permission.</td></tr>
-  <tr><td>Channel access</td><td>Dropdown</td><td>CSMA (legacy contention, section 3.4) or Ring (deterministic turns, section 3.5). Must match on every station.</td></tr>
-  <tr><td>&#9432; UV-5R / FT-65 defaults</td><td>Help link</td><td>Opens a dialog with the recommended Ring/VOX values for the reference radios, why their VOX hang cannot be shortened, the Guard calibration procedure, and hardwired-PTT alternatives (section 3.5).</td></tr>
-  <tr><td>Guard ms / Skip ms / Max turn ms</td><td>Number fields</td><td>Ring MAC timing (section 3.5): Guard covers the radios&rsquo; VOX hang (default 1500), Skip covers VOX attack before skipping a silent station (default 1200), Max turn caps one batch (0 = automatic per modem). Same values on every station. Since 0.23 a larger Max turn also fits more frames into each batch (faster queue drain at the cost of longer turns).</td></tr>
+  <tr><td>TX output / PTT</td><td>Dropdown</td><td>Where transmit audio goes and how the radio is keyed. <b>Speaker &mdash; VOX / acoustic</b> (default): audio plays from the phone speaker into the radio&rsquo;s mic and the radio&rsquo;s VOX (or a finger on PTT) keys the transmitter; TX audio is explicitly pinned to the speaker even when a USB interface is attached. <b>USB + RTS PTT (Digirig)</b>: TX audio is routed to the USB audio interface on the MEDIA stream (set Media volume to max) and the plugin keys the radio electrically 60 ms before each burst: CP210x serial RTS on the Digirig Mobile, CM108 GPIO on the Digirig Lite &mdash; no VOX attack or hang, so Guard 300&ndash;500 ms and VOX Lead 0 apply (&#9432; dialog). Requires a one-time Android USB permission.</td></tr>
+  <tr><td>Channel access</td><td>Dropdown</td><td>CSMA (contention, section 3.5) or Ring (deterministic turns, section 3.6). Must match on every station.</td></tr>
+  <tr><td>&#9432; UV-5R / FT-65 defaults</td><td>Help link</td><td>Opens a dialog with the recommended Ring/VOX values for the reference radios, why their VOX hang cannot be shortened, the Guard calibration procedure, and hardwired-PTT alternatives (section 3.6).</td></tr>
+  <tr><td>Guard ms / Skip ms / Max turn ms</td><td>Number fields</td><td>Ring MAC timing (section 3.6): Guard covers the radios&rsquo; VOX hang (default 1500), Skip covers VOX attack before skipping a silent station (default 1200), Max turn caps one batch (0 = automatic per modem). Same values on every station. A larger Max turn also fits more frames into each batch (faster queue drain at the cost of longer turns); PSK31 always sends exactly one frame per turn regardless.</td></tr>
   <tr><td>C2 Bridge (radio &rarr; network, one-way)</td><td>Checkbox (Options tab)</td><td>Activates the one-way data diode of section 2.1: decoded radio traffic is re-published onto the ATAK network, while network-origin events are blocked from automatic radio transmission and stashed for Push to RF. Takes effect immediately; the header shows <b>&middot; BRIDGE</b> while on.</td></tr>
   <tr><td>Push to RF&hellip;</td><td>Button (Options tab)</td><td>Opens a multi-select list of recently blocked network-origin items (newest 20, kept 10 minutes). Confirming transmits the selected items over radio once, through the normal HBC encode/queue path &mdash; the deliberate operator exception to the diode.</td></tr>
   <tr><td>Transmit / Receive</td><td>Checkboxes</td><td>Master switches. Unchecking Transmit makes the station receive-only; unchecking Receive ignores all incoming audio.</td></tr>
@@ -622,10 +662,9 @@ the build stamp and the Start/Stop button.</p>
   <tr><th>Icon</th><th>Tap</th><th>Notes</th></tr>
   <tr><td>HBC Radio (radio-tower glyph)</td><td>Opens the plugin pane</td><td>The plugin&rsquo;s single entry point in ATAK&rsquo;s Tools menu (Figure 1). The Tools grid tints icons white, so the entry uses a transparent-background tower silhouette; the colored badge appears as the app icon in TAK Package Mgmt and the plugin manager.</td></tr>
 </table>
-<div class="note"><b>Changed in 0.22:</b> the separate gray/green radio-status toolbar
-icon (tap-to-toggle) was removed &mdash; the radio link is controlled entirely from the
-pane&rsquo;s Start/Stop button, and the link state is shown by the colored header status
-line (red STOPPED / green RUNNING).</div>
+<div class="note"><b>NOTE:</b> there is no separate radio-status toolbar icon &mdash; the
+radio link is controlled entirely from the pane&rsquo;s Start/Stop button, and the link
+state is shown by the colored header status line (red STOPPED / green RUNNING).</div>
 
 <h3>6.4 Reading the Activity Log</h3>
 <p>Every line starts with a <code>HH:mm:ss</code> timestamp; the newest line is at the top.
@@ -640,23 +679,23 @@ runtime) and what each one means.</p>
   <tr><td class="mono">Modem started ... / RX audio source: {source}</td><td>Which microphone source the receiver opened (VOICE_RECOGNITION, UNPROCESSED, or MIC; &ldquo;via USB&rdquo; when a Digirig-style interface is attached).</td></tr>
   <tr><td class="mono">RX disabled: microphone unavailable</td><td>ATAK lacks the RECORD_AUDIO permission or another app holds the mic; receiving is off.</td></tr>
   <tr><td class="mono">TX {details} ({n} ms burst)</td><td>A transmission finished playing; <code>n</code> is its on-air duration.</td></tr>
-  <tr><td class="mono">CSMA: channel busy &mdash; deferring TX</td><td>Someone else is on the air; the plugin is politely waiting (section 3.4).</td></tr>
-  <tr><td class="mono">CSMA: channel busy &gt; 8 s &mdash; transmitting anyway</td><td>The channel never cleared, so the frame was sent to avoid starving traffic.</td></tr>
+  <tr><td class="mono">CSMA: channel busy &mdash; deferring TX</td><td>Someone else is on the air; the plugin is politely waiting (section 3.5).</td></tr>
+  <tr><td class="mono">CSMA: channel busy &gt; {n} s &mdash; transmitting anyway</td><td>The channel never cleared within the modem&rsquo;s patience window (8 s AFSK/OFDM, 15 s Mercury, 90 s PSK31), so the frame was sent to avoid starving traffic.</td></tr>
   <tr><td class="mono">OFDM sync: {call} ... / Mercury sync acquired</td><td>The demodulator locked onto an incoming signal (decode result follows).</td></tr>
   <tr><td class="mono">TX batch: {n} frames ({t} ms burst)</td><td>Several queued frames went out as one continuous keying (one VOX cycle for the whole batch).</td></tr>
-  <tr><td class="mono">PTT: USB RTS ready ({name}) / PTT: USB GPIO ready ({name})</td><td>The keyer is open &mdash; CP210x serial RTS (Digirig Mobile) or CM108 GPIO (Digirig Lite, 0.26); every transmission keys the radio electrically.</td></tr>
+  <tr><td class="mono">PTT: USB RTS ready ({name}) / PTT: USB GPIO ready ({name})</td><td>The keyer is open &mdash; CP210x serial RTS (Digirig Mobile) or CM108 GPIO (Digirig Lite); every transmission keys the radio electrically.</td></tr>
   <tr><td class="mono">PTT: no Digirig PTT device found (CP210x serial or CM108 GPIO) &mdash; using VOX/manual keying</td><td>USB + RTS PTT is selected but no keyer hardware is attached; audio still plays, but the radio must be keyed by VOX or by hand.</td></tr>
-  <tr><td class="mono">PTT: TX audio uses the Media volume on USB &mdash; set Media volume to max</td><td>Reminder on engage (0.26): over USB the tones ride the MEDIA stream; a low Media volume makes TX into the radio faint.</td></tr>
+  <tr><td class="mono">PTT: TX audio uses the Media volume on USB &mdash; set Media volume to max</td><td>Reminder on engage: over USB the tones ride the MEDIA stream; a low Media volume makes TX into the radio faint.</td></tr>
   <tr><td class="mono">PTT: requesting USB access &mdash; approve the dialog (RTS engages automatically)</td><td>Android is showing its &ldquo;Allow ATAK to access the USB device?&rdquo; dialog; after Allow, RTS PTT engages by itself (<code>PTT: USB permission granted</code> follows). Denying logs <code>PTT: USB permission denied</code>.</td></tr>
   <tr><td class="mono">PTT: RTS write failed ({code}) &mdash; reconnect the Digirig and Stop/Start</td><td>The USB device stopped accepting the keying command (unplugged/re-enumerated); reconnect and restart the link.</td></tr>
-  <tr><td class="mono">PTT: Digirig attached &mdash; engaging / PTT: Digirig detached &mdash; RTS PTT off (VOX/manual keying)</td><td>Hot-plug while the link runs: attaching a Digirig engages PTT automatically; detaching falls back to plain audio. Since 0.26 every USB attach/detach also re-opens the receive path (a fresh <code>RX audio source: &hellip;</code> line follows) &mdash; no Stop/Start needed after a reconnect.</td></tr>
+  <tr><td class="mono">PTT: Digirig attached &mdash; engaging / PTT: Digirig detached &mdash; RTS PTT off (VOX/manual keying)</td><td>Hot-plug while the link runs: attaching a Digirig engages PTT automatically; detaching falls back to plain audio. Every USB attach/detach also re-opens the receive path (a fresh <code>RX audio source: &hellip;</code> line follows) &mdash; no Stop/Start needed after a reconnect.</td></tr>
 </table>
 <div class="note"><b>NOTE:</b> plugging in the Digirig may also pop Android&rsquo;s generic
 &ldquo;Choose an app for the USB device&rdquo; chooser. ATAK is not listed there (it registers
 no USB-launch handler) and that chooser is irrelevant to the plugin &mdash; dismiss it. The
 dialog that matters is the <i>Allow ATAK to access the USB device</i> permission prompt the
 plugin raises when the radio link starts in USB + RTS PTT mode.</div>
-<p><b>Channel access (Ring MAC, section 3.5):</b></p>
+<p><b>Channel access (Ring MAC, section 3.6):</b></p>
 <table>
   <tr><th>Message</th><th>Meaning</th></tr>
   <tr><td class="mono">Ring: started ({n} stations, guard {g} ms, skip {s} ms)</td><td>Ring mode is on with these parameters and this roster size.</td></tr>
@@ -665,9 +704,9 @@ plugin raises when the radio link starts in USB + RTS PTT mode.</div>
   <tr><td class="mono">Ring: roster now {n} stations ({list})</td><td>The rotation list changed at a cycle wrap (station joined or expired).</td></tr>
   <tr><td class="mono">Ring: {call} dormant (3 silent turns)</td><td>That station has not transmitted for 3 cycles; it keeps costing only the Skip time.</td></tr>
   <tr><td class="mono">Ring: emergency frame queued &mdash; preempting at next idle window / Ring: emergency TX ({x} frames, preempt)</td><td>A 911 alert jumped the turn order in an idle gap (the single allowed exception).</td></tr>
-  <tr><td class="mono">Ring: TX queue {n} frames (~{t} s to drain)</td><td>More than 6 frames are waiting for this station&rsquo;s turns (estimate from the measured rotation time; logged at most every 30 s). If it persists, slow down chat/marker sends &mdash; see section 3.5&rsquo;s ARQ-interaction note.</td></tr>
-  <tr><td class="mono">Ring: TX turn ({i}/{n}, {x} frames, forced &mdash; channel busy all turn)</td><td>The busy interlock blocked this station&rsquo;s whole turn (open squelch, hot Digirig RX line, constant interference), so the batch transmitted at the deadline anyway &mdash; the Ring equivalent of CSMA&rsquo;s give-up override (0.27). Check radio RX volume/squelch if this repeats.</td></tr>
-  <tr><td class="mono">TX ISSUE: {n} frames stuck in the TX queue &mdash; …</td><td>Watchdog (0.27): more than 5 frames are waiting anywhere in the TX path and not draining; the channel reads permanently busy or the PTT/audio path failed. Logged with a toast at most every 30 s; Stop/Start recovers if it persists.</td></tr>
+  <tr><td class="mono">Ring: TX queue {n} frames (~{t} s to drain)</td><td>More than 6 frames are waiting for this station&rsquo;s turns (estimate from the measured rotation time; logged at most every 30 s). If it persists, slow down chat/marker sends &mdash; see section 3.6&rsquo;s ARQ-interaction note.</td></tr>
+  <tr><td class="mono">Ring: TX turn ({i}/{n}, {x} frames, forced &mdash; channel busy all turn)</td><td>The busy interlock blocked this station&rsquo;s whole turn (open squelch, hot Digirig RX line, constant interference), so the batch transmitted at the deadline anyway &mdash; the Ring equivalent of CSMA&rsquo;s give-up override. Check radio RX volume/squelch if this repeats.</td></tr>
+  <tr><td class="mono">TX ISSUE: {n} frames stuck in the TX queue &mdash; …</td><td>Watchdog: more than 5 frames are waiting anywhere in the TX path and not draining; the channel reads permanently busy or the PTT/audio path failed. Logged with a toast at most every 30 s; Stop/Start recovers if it persists.</td></tr>
 </table>
 <p><b>C2 Bridge (section 2.1):</b></p>
 <table>
@@ -696,7 +735,7 @@ plugin raises when the radio link starts in USB + RTS PTT mode.</div>
   <tr><td class="mono">Mesh: direct to {call} via {call2} (seq {n})</td><td>A routed Direct left this station; an ACK is now awaited.</td></tr>
   <tr><td class="mono">Mesh: direct to {call} via {call2} (seq {n}, unacked)</td><td>A fire-and-forget Direct (chat delivered/read receipt): no retries, no failure verdict (section 4.9).</td></tr>
   <tr><td class="mono">Mesh: {call} acknowledged seq {n}</td><td>Delivery confirmed &mdash; the destination&rsquo;s ACK arrived.</td></tr>
-  <tr><td class="mono">Mesh: retry {i}/3 to {call} via {call2}</td><td>No ACK yet; the Direct was re-sent (same sequence ID). Since 0.23 this fires only after the previous copy actually aired &mdash; under Ring, at least ~1.25 rotations later.</td></tr>
+  <tr><td class="mono">Mesh: retry {i}/3 to {call} via {call2}</td><td>No ACK yet; the Direct was re-sent (same sequence ID). This fires only after the previous copy actually aired &mdash; under Ring, at least ~1.25 rotations later.</td></tr>
   <tr><td class="mono">Mesh: direct to {call} FAILED (no ack after 3 retries)</td><td>Delivery gave up. The station is likely out of range or off. Also issued when queued copies could not reach the air for 3 minutes (stuck queue).</td></tr>
   <tr><td class="mono">Mesh: no route to {call} &mdash; sending as broadcast</td><td>No address-book entry for the destination, so the message went out unrouted; the station will still get it if in direct range.</td></tr>
   <tr><td class="mono">Mesh: forwarding {call} -&gt; {call2} via {call3}</td><td>This station is acting as a relay for someone else&rsquo;s Direct.</td></tr>
@@ -740,43 +779,43 @@ answers &ldquo;what have I actually received?&rdquo;</div>
   <tr><td>Route entry TTL</td><td>30 min (refreshed by any heard frame)</td><td>Mesh</td></tr>
   <tr><td>Duplicate cache TTL</td><td>5 min</td><td>Mesh</td></tr>
   <tr><td>Cleanup interval</td><td>60 s</td><td>Mesh</td></tr>
-  <tr><td>Direct retry timer</td><td>Armed when the frame airs (0.23). CSMA: 5 s + 0&ndash;2 s jitter; Ring: max(8 s, 1.25 &times; measured rotation), cap 60 s. Max 3 retries; stuck-queue fail 180 s</td><td>Mesh</td></tr>
+  <tr><td>Direct retry timer</td><td>Armed when the frame airs. CSMA: 5 s + 0&ndash;2 s jitter; Ring: max(8 s, 1.25 &times; measured rotation), cap 60 s. Max 3 retries; stuck-queue fail 180 s</td><td>Mesh</td></tr>
   <tr><td>Quiet-time announce keepalive</td><td>10 min without own traffic</td><td>Mesh</td></tr>
-  <tr><td>CSMA busy threshold / hold</td><td>4&times; adaptive noise floor / 400 ms; busy persisting &gt; 10 s re-baselines the floor so a hot RX line cannot latch the channel busy (0.27)</td><td>PHY</td></tr>
-  <tr><td>CSMA backoff / give-up</td><td>150&ndash;550 ms clear / 8 s (15 s Mercury)</td><td>PHY</td></tr>
+  <tr><td>CSMA busy threshold / hold</td><td>4&times; adaptive noise floor / 400 ms; busy persisting past the modem&rsquo;s re-baseline window (10 s; 90 s on PSK31) folds into the noise floor so a hot RX line cannot latch the channel busy</td><td>PHY</td></tr>
+  <tr><td>CSMA backoff / give-up</td><td>150&ndash;550 ms clear / 8 s (15 s Mercury, 90 s PSK31)</td><td>PHY</td></tr>
   <tr><td>Ring Guard (VOX hang cover)</td><td>User setting, default 1500 ms (UV-5R / FT-65 profile)</td><td>MAC</td></tr>
   <tr><td>Ring Skip (silent-station timeout)</td><td>User setting, default 1200 ms</td><td>MAC</td></tr>
-  <tr><td>Ring Max turn</td><td>Auto per modem: AFSK 6000 / OFDM 4400 / Mercury 6000 ms (user-overridable)</td><td>MAC</td></tr>
+  <tr><td>Ring Max turn</td><td>Auto per modem: AFSK 6000 / OFDM 4400 / Mercury 6000 / PSK31 ~94000 ms, sized from the worst-case frame airtime (user-overridable)</td><td>MAC</td></tr>
   <tr><td>Ring settle (join listening)</td><td>1 observed cycle, max 30 s</td><td>MAC</td></tr>
-  <tr><td>Ring batch caps</td><td>Derived from Max turn (0.23); at the automatic defaults: AFSK 4 / OFDM 2 / Mercury 1 frames per keying (also applies under CSMA)</td><td>MAC/PHY</td></tr>
-  <tr><td>PLI rate limit</td><td>User setting, default 60 s (Figure 8); Ring mode floors it at roster &times; 8 s (&times; 13 s Mercury, raised in 0.23)</td><td>Application</td></tr>
+  <tr><td>Ring batch caps</td><td>Derived from Max turn; at the automatic defaults: AFSK 4 / OFDM 2 / Mercury 1 / PSK31 1 frames per keying (also applies under CSMA)</td><td>MAC/PHY</td></tr>
+  <tr><td>PLI rate limit</td><td>User setting, default 60 s (Figure 8); Ring mode floors it at roster &times; 8 s (&times; 13 s Mercury, &times; 25 s PSK31)</td><td>Application</td></tr>
+  <tr><td>PSK31 frame airtime</td><td>&asymp;0.4 s per byte + ~4 s preamble/overhead (PLI &asymp; 16 s; 180-byte maximum frame &asymp; 77 s)</td><td>PHY</td></tr>
   <tr><td>RX duplicate window (frame hash)</td><td>30 s</td><td>Plugin</td></tr>
 </table>
 
 <h2>8. Compatibility and Constraints</h2>
 <ul>
-  <li>All stations on a channel must run the same plugin wire version (0.12+ mesh framing)
-      and select the same modem (Figure 3).</li>
-  <li>The channel-access mode (section 3.4/3.5) is <b>behavioral only</b> &mdash; nothing on
-      the air changes &mdash; so 0.21-and-earlier stations interoperate with 0.22 stations.
-      For orderly rotation every station should still select the same mode and the same
-      Guard/Skip values; a CSMA station mixed into a Ring net simply contends as before and
-      the Ring stations defer to its carrier (the net degrades toward polite CSMA, never
-      below it).</li>
-  <li>The 0.23 ARQ changes (TX-gated, rotation-scaled retries; unacknowledged receipts;
-      PLI floor &times; 8 s) are likewise behavioral only &mdash; wire-identical with 0.22.
-      In a mixed net, 0.22-and-earlier stations simply keep their old 5 s retry behavior
-      (and its queue growth) while 0.23 stations do not.</li>
-  <li>The 0.24 C2 Bridge (section 2.1) is local behavior on the bridge phone only &mdash;
-      one-way RF &rarr; network by design. Radio-side stations need no update and hear
-      nothing new on the air except items the bridge operator deliberately pushes; network
-      clients just receive ordinary CoT.</li>
-  <li>The 0.25 TX output / RTS PTT selector only changes how the local station keys its
-      own radio &mdash; the waveforms are identical, so VOX-keyed and RTS-keyed stations
-      mix freely on one channel (RTS stations may simply run tighter Guard timing).</li>
+  <li>All stations on a channel must run plugin builds with the same mesh framing and
+      select the same modem (Figure 3).</li>
+  <li>The channel-access mode (section 3.5/3.6) is <b>behavioral only</b> &mdash; nothing on
+      the air changes. For orderly rotation every station should select the same mode and
+      the same Guard/Skip values; a CSMA station mixed into a Ring net simply contends as
+      before and the Ring stations defer to its carrier (the net degrades toward polite
+      CSMA, never below it).</li>
+  <li>The C2 Bridge (section 2.1) is local behavior on the bridge phone only &mdash;
+      one-way RF &rarr; network by design. Radio-side stations hear nothing new on the air
+      except items the bridge operator deliberately pushes; network clients just receive
+      ordinary CoT.</li>
+  <li>The TX output / RTS PTT selector only changes how the local station keys its own
+      radio &mdash; the waveforms are identical, so VOX-keyed and RTS-keyed stations mix
+      freely on one channel (RTS stations may simply run tighter Guard timing).</li>
   <li>Mercury DATAC4&rsquo;s small frame limits routed Directs to ~29 bytes of HBC payload
       (Broadcasts ~39 B). Every standard message fits; unusually large Mode 6 markers may
       need Broadcast or a different modem.</li>
+  <li>PSK31 accepts mesh frames up to 180 bytes but is extremely slow (section 3.4): a
+      position report costs ~16 s of air. Prefer the Ring MAC whenever three or more
+      stations share a PSK31 channel, and disable or maximize radio time-out timers
+      (bursts can exceed 60 s).</li>
   <li>Callsigns: at most 8 ITA2 characters (A&ndash;Z, 0&ndash;9, hyphen).</li>
   <li>No encryption is used or permitted; never transmit sensitive data.</li>
 </ul>
@@ -795,10 +834,11 @@ answers &ldquo;what have I actually received?&rdquo;</div>
   <tr><td>Route / next hop</td><td>Address-book entry: which neighbor to hand a message to so it reaches a destination</td></tr>
   <tr><td>ACK</td><td>Acknowledgment &mdash; a short &ldquo;received OK&rdquo; reply</td></tr>
   <tr><td>ARQ</td><td>Automatic Repeat reQuest &mdash; send, await the ACK, re-send on timeout (section 4.9)</td></tr>
-  <tr><td>C2 Bridge / data diode</td><td>The 0.24 one-way gateway (section 2.1): radio traffic flows to the network automatically; network traffic reaches the radio only by deliberate operator action</td></tr>
+  <tr><td>C2 Bridge / data diode</td><td>The one-way gateway (section 2.1): radio traffic flows to the network automatically; network traffic reaches the radio only by deliberate operator action</td></tr>
   <tr><td>CSMA</td><td>Carrier Sense Multiple Access &mdash; listen before transmitting to avoid collisions</td></tr>
   <tr><td>MAC</td><td>Medium Access Control &mdash; the rules deciding when a station may transmit (CSMA or Ring here)</td></tr>
-  <tr><td>Ring MAC / turn</td><td>The 0.22 channel-access mode: stations rotate through the sorted roster; a turn is one station&rsquo;s transmit window</td></tr>
+  <tr><td>Ring MAC / turn</td><td>The deterministic channel-access mode (section 3.6): stations rotate through the sorted roster; a turn is one station&rsquo;s transmit window</td></tr>
+  <tr><td>PSK31 / Varicode</td><td>A 31.25-baud amateur keyboard mode and its variable-length text alphabet (ITU-R M.2034); HBC reuses the waveform to carry armored binary frames (section 3.4)</td></tr>
   <tr><td>Guard time</td><td>Silence a Ring station waits after the channel clears, covering the previous radio&rsquo;s VOX hang</td></tr>
   <tr><td>VOX</td><td>Voice-operated transmit &mdash; the radio keys up automatically when it hears audio</td></tr>
   <tr><td>CRC</td><td>Cyclic Redundancy Check — a checksum that detects corrupted data</td></tr>
@@ -814,6 +854,7 @@ answers &ldquo;what have I actually received?&rdquo;</div>
   <li><i>Adaptation of Uncoordinated Distance-Vector Routing for Unencrypted Amateur Radio Networks</i> (routing protocol paper)</li>
   <li>Mercury HF modem &mdash; mercury.hermes.radio; FreeDV/codec2 &mdash; github.com/drowe67/codec2</li>
   <li>rattlegram / COFDMTV &mdash; github.com/aicodix/rattlegram</li>
+  <li>ITU-R Recommendation M.2034 &mdash; the PSK31 (31.25 Bd BPSK + Varicode) amateur standard carried by the PSK31 modem (section 3.4)</li>
 </ol>
 
 <div class="pagebreak"></div>
@@ -835,19 +876,22 @@ everything described in this document is implemented.</p>
 │       │   │   ├── BitWriter.java        Bit-level write helper for the codec
 │       │   │   ├── MeshRouter.java       Mesh network layer: packets, routing,
 │       │   │   │                         retries, ACKs (Section 4, 4.9)
-│       │   │   ├── RingMac.java          Ring MAC turn rotation (Section 3.5)
+│       │   │   ├── RingMac.java          Ring MAC turn rotation (Section 3.6)
 │       │   │   ├── BridgePolicy.java     C2 Bridge data-diode rules + push stash (Section 2.1)
-│       │   │   ├── PttKeyer.java         Hardware-PTT hook used by the modems (0.25)
-│       │   │   ├── CsmaSense.java        Listen-before-transmit logic (Section 3.4)
+│       │   │   ├── PttKeyer.java         Hardware-PTT hook used by the modems
+│       │   │   ├── CsmaSense.java        Listen-before-transmit logic (Section 3.5)
 │       │   │   ├── AudioModem.java       AFSK1200 modem (Section 3.1)
 │       │   │   ├── OfdmModem.java        OFDM COFDMTV modem (Section 3.2)
 │       │   │   ├── OfdmNative.java       Java ↔ C++ bridge for the OFDM library
 │       │   │   ├── MercuryModem.java     Mercury HF modem (Section 3.3)
 │       │   │   ├── MercuryNative.java    Java ↔ C bridge for the FreeDV library
+│       │   │   ├── Psk31.java            BPSK31 engine: Varicode, filters, AFC (Section 3.4)
+│       │   │   ├── Psk31Armor.java       Text armor + CRC-16 + airtime estimator (Section 3.4)
+│       │   │   ├── Psk31Modem.java       PSK31 modem (Section 3.4)
 │       │   │   └── plugin/
 │       │   │       ├── HbcPlugin.java    The plugin itself: settings pane, toolbar
 │       │   │       │                     icons, TX/RX plumbing, ATAK integration
-│       │   │       └── UsbPtt.java       Digirig CP210x RTS PTT driver (0.25)
+│       │   │       └── UsbPtt.java       Digirig RTS/GPIO PTT driver
 │       │   └── sivantoledo/ax25/...      Bundled javAX25 library (AFSK/AX.25, GPL)
 │       ├── cpp/
 │       │   ├── CMakeLists.txt            Native build: libhbcofdm + libhbcmercury
@@ -866,11 +910,12 @@ everything described in this document is implemented.</p>
 │   ├── Mode6Test.java                Byte-exact tests for Mode 6 extended markers
 │   ├── MeshRouterTest.java           Byte-exact + behavior tests for the mesh layer
 │   ├── RingMacTest.java              Ring MAC turn rules under a scripted clock
+│   ├── Psk31LinkTest.java            PSK31 armor/modem link tests (audio loopback)
 │   └── BridgePolicyTest.java         C2 Bridge diode/forward/stash rules
 ├── docs/
 │   ├── HBC_ICD.html                  This document (editable source)
 │   ├── HBC_ICD.pdf                   This document (rendered)
-│   └── images/                       Figures 1–13 (annotated 0.26 screenshots)
+│   └── images/                       Figures 1–13 (annotated screenshots)
 ├── gradle/, gradlew, gradlew.bat     Gradle build system wrapper
 ├── settings.gradle, build.gradle     Project-level build configuration
 ├── .takdev/                          TAK SDK build-plugin support files
@@ -885,7 +930,7 @@ in <code>HbcPlugin.java</code> plus <code>res/layout/main_layout.xml</code>. The
 <code>codec-test/</code> programs run on an ordinary computer (no phone needed) and prove the
 byte formats match this document.</div>
 
-<div class="footer">HBC Radio ICD &nbsp;Version 1.7 &nbsp;|&nbsp; Oct 2026 &nbsp;|&nbsp; KE8TQB &nbsp;|&nbsp; github.com/ke8tqb/HBC-ATAK-Plugin</div>
+<div class="footer">HBC Radio ICD &nbsp;Version 1.8 &nbsp;|&nbsp; Oct 2026 &nbsp;|&nbsp; KE8TQB &nbsp;|&nbsp; github.com/ke8tqb/HBC-ATAK-Plugin</div>
 
 </body>
 </html>
