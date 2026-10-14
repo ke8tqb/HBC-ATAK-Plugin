@@ -72,6 +72,14 @@ public class Psk31Modem {
     public Psk31Modem(Context context, OfdmModem.PayloadListener listener) {
         this.context = context;
         this.listener = listener;
+        // A neighbor's PSK31 burst is a continuous carrier for up to
+        // ~77 s. The carrier sense's stuck-squelch re-baseline (10 s
+        // default, right for the fast modems) must not absorb a real
+        // burst into the noise floor and declare the channel clear
+        // mid-transmission — that would silently defeat the 90 s CSMA
+        // patience below. 90 s: a genuinely stuck-open squelch still
+        // re-baselines, just on this modem's airtime scale.
+        csma.setBusyRebaselineMs(90_000);
     }
 
     public void setVoxLeaderMs(int ms) {

@@ -34,6 +34,13 @@ All notable changes to HBC Audio Plugin are documented here.
   not payload length).
 - CSMA on PSK31: patience window raised to 90 s (> longest possible
   neighbor burst).
+- Carrier-sense re-baseline is now per-modem (`CsmaSense.
+  setBusyRebaselineMs`): the v0.27 stuck-squelch heuristic (10 s)
+  assumed bursts of a few seconds, but a PSK31 burst is a continuous
+  carrier for up to ~77 s — the shared 10 s window would absorb a
+  neighbor's burst into the noise floor and declare the channel clear
+  mid-transmission, defeating the 90 s patience. PSK31 re-baselines at
+  90 s; AFSK/OFDM/Mercury keep the 10 s default (behavior unchanged).
 - PLI pacing: Ring PLI auto-floor adds a PSK31 tier (25 s/station;
   AFSK/OFDM 8 s, Mercury 13 s) so N stations' position beacons cannot
   consume the rotation.

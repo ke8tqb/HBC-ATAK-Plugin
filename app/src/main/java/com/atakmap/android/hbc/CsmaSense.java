@@ -33,12 +33,25 @@ public final class CsmaSense {
     private static final double MIN_RMS = 150.0 / 32768.0;  // absolute busy threshold
     private static final int BUSY_HOLD_MS = 400;            // bridges in-signal gaps
 
-    // v0.27: a real transmission lasts seconds. If "busy" persists far
-    // longer, the loud level IS the channel (open squelch / hot Digirig RX
-    // line / constant interference) — re-baseline the floor toward it so
-    // carrier sense releases instead of latching busy forever (which
-    // starved the Ring MAC's own turn in the field).
-    private static final long BUSY_REBASELINE_MS = 10_000;
+    // v0.27: if "busy" persists far longer than this modem's real
+    // transmissions last, the loud level IS the channel (open squelch /
+    // hot Digirig RX line / constant interference) — re-baseline the
+    // floor toward it so carrier sense releases instead of latching busy
+    // forever (which starved the Ring MAC's own turn in the field).
+    //
+    // v0.28: per-modem, because "far longer than a real transmission"
+    // depends on the modem. 10 s suits AFSK/OFDM/Mercury (bursts of a
+    // few seconds); a PSK31 burst is a CONTINUOUS carrier for up to
+    // ~77 s, which the 10 s default would mistake for a stuck-open
+    // squelch — releasing carrier sense mid-burst and defeating the
+    // modem's long CSMA patience. Each modem owns its own CsmaSense and
+    // configures this to exceed its own worst-case burst.
+    private volatile long busyRebaselineMs = 10_000;
+
+    /** Set the busy re-baseline window (see above). Per-modem tuning. */
+    public void setBusyRebaselineMs(long ms) {
+        busyRebaselineMs = Math.max(1000, ms);
+    }
 
     private final Random random = new Random();
     private volatile long lastBusyMs = 0;
@@ -78,7 +91,7 @@ public final class CsmaSense {
             lastBusyMs = now;
             if (!continuing || busyEpisodeStartMs == 0) {
                 busyEpisodeStartMs = now;
-            } else if (now - busyEpisodeStartMs > BUSY_REBASELINE_MS) {
+            } else if (now - busyEpisodeStartMs > busyRebaselineMs) {
                 // persistent "carrier": absorb it into the noise floor so
                 // isBusy() can release once the floor catches up
                 noiseFloor = 0.95 * floor + 0.05 * rms;
