@@ -3,7 +3,7 @@
     <!-- App -->
     <string name="app_name">HBC Radio</string>
     <!-- description -->
-    <string name="app_desc">Ham Binary CoT (HBC) over a distance-vector mesh: encodes CoT events to compact HBC frames, routes them via announce-based mesh networking, and transmits them as audio (AFSK1200, OFDM, or Mercury HF) for VOX-keyed ham radios; received audio is decoded back into ATAK.</string>
+    <string name="app_desc">Ham Binary CoT (HBC) over a distance-vector mesh: encodes CoT events to compact HBC frames, routes them via announce-based mesh networking, and transmits them as audio (AFSK1200, OFDM, Mercury HF, or PSK31) for VOX-keyed ham radios; received audio is decoded back into ATAK.</string>
 
     <string name="hbc_title">HBC Packet Radio Link</string>
     <string name="hbc_radio_status_label">HBC Radio Status</string>
@@ -40,13 +40,14 @@
     <string name="hbc_back">◀ Back</string>
     <string name="hbc_decodes_none">No packets decoded yet</string>
     <string name="hbc_modem_label">Modem (must match on all stations!)</string>
-    <!-- Display order: OFDM (default), Mercury, AX.25. Stored pref values
-         keep the historic meaning 0=AFSK 1=OFDM 2=Mercury; HbcPlugin maps
-         spinner position <-> stored type. -->
+    <!-- Display order: OFDM (default), Mercury, AX.25, PSK31. Stored pref
+         values keep the historic meaning 0=AFSK 1=OFDM 2=Mercury 3=PSK31;
+         HbcPlugin maps spinner position <-> stored type. -->
     <string-array name="hbc_modem_options">
         <item>OFDM (Rattlegram)</item>
         <item>Mercury</item>
         <item>AX.25/APRS</item>
+        <item>PSK31 (very slow \u2014 PLI \u224815 s on air)</item>
     </string-array>
     <string name="hbc_stream_label">TX audio stream (try others if your device distorts tones)</string>
     <string name="hbc_tx_output_label">TX output / PTT</string>

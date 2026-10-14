@@ -23,6 +23,7 @@ import com.atakmap.android.hbc.Ita2;
 import com.atakmap.android.hbc.MercuryModem;
 import com.atakmap.android.hbc.MeshRouter;
 import com.atakmap.android.hbc.OfdmModem;
+import com.atakmap.android.hbc.Psk31Modem;
 import com.atakmap.android.hbc.RingMac;
 import com.atakmap.comms.CommsMapComponent;
 import com.atakmap.coremap.cot.event.CotEvent;
@@ -77,6 +78,7 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
     private AudioModem modem;
     private OfdmModem ofdm;
     private MercuryModem mercury;
+    private Psk31Modem psk31;
     private MeshRouter mesh;
     private RingMac ringMac;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -448,9 +450,11 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
         AudioModem m = modem;
         OfdmModem o = ofdm;
         MercuryModem h = mercury;
+        Psk31Modem p = psk31;
         if (m != null) depth += m.queuedFrames();
         if (o != null) depth += o.queuedFrames();
         if (h != null) depth += h.queuedFrames();
+        if (p != null) depth += p.queuedFrames();
         if (depth <= 5) {
             if (depth == 0) lastTxAlarmMs = 0;
             return;
@@ -635,14 +639,16 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
     }
 
     /**
-     * The modem spinner displays OFDM, Mercury, AX.25 (in that order, OFDM
-     * default) but the stored pref keeps the historic encoding
-     * 0=AFSK 1=OFDM 2=Mercury so existing installs keep their selection.
+     * The modem spinner displays OFDM, Mercury, AX.25, PSK31 (in that
+     * order, OFDM default) but the stored pref keeps the historic encoding
+     * 0=AFSK 1=OFDM 2=Mercury 3=PSK31 so existing installs keep their
+     * selection.
      */
     private static int modemPosToType(int pos) {
         switch (pos) {
             case 0:  return 1;   // OFDM
             case 1:  return 2;   // Mercury
+            case 3:  return 3;   // PSK31
             default: return 0;   // AX.25/AFSK
         }
     }
@@ -651,6 +657,7 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
         switch (type) {
             case 1:  return 0;   // OFDM
             case 2:  return 1;   // Mercury
+            case 3:  return 3;   // PSK31
             default: return 2;   // AX.25/AFSK
         }
     }
@@ -684,7 +691,7 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
     // ------------------------------------------------------------------
     // Radio lifecycle
     // ------------------------------------------------------------------
-    /** 0 = AFSK1200, 1 = OFDM (COFDMTV), 2 = Mercury HF (FreeDV DATAC) */
+    /** 0 = AFSK1200, 1 = OFDM (COFDMTV), 2 = Mercury HF, 3 = PSK31 */
     private int modemType() {
         return prefs.getInt("modem_type", 1);   // default OFDM
     }
@@ -693,6 +700,7 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
         switch (modemType()) {
             case 1:  return "OFDM";
             case 2:  return "Mercury HF";
+            case 3:  return "PSK31";
             default: return "AFSK1200";
         }
     }
@@ -735,6 +743,12 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
                     mercury.setTxStreamIndex(prefs.getInt("tx_stream", 0));
                     mercury.start();
                     break;
+                case 3:
+                    psk31 = new Psk31Modem(pluginContext, this);
+                    psk31.setVoxLeaderMs(prefs.getInt("vox_leader_ms", 0));
+                    psk31.setTxStreamIndex(prefs.getInt("tx_stream", 0));
+                    psk31.start();
+                    break;
                 default:
                     modem = new AudioModem(pluginContext, this);
                     modem.setTxDwellMs(prefs.getInt("dwell_ms", 500));
@@ -752,6 +766,7 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
             if (modem != null)   modem.setTxOutput(txOut);
             if (ofdm != null)    ofdm.setTxOutput(txOut);
             if (mercury != null) mercury.setTxOutput(txOut);
+            if (psk31 != null)   psk31.setTxOutput(txOut);
             if (txOut == 1) {
                 registerUsbPermReceiver();
                 engageUsbPtt();
@@ -813,6 +828,17 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
                 switch (modemType()) {
                     case 1:  autoTurn = 4400; perFrameMs = 1700; break;
                     case 2:  autoTurn = 6000; perFrameMs = 6000; break;
+                    case 3:
+                        // v0.28 PSK31: airtime-sized turn budget. A burst is
+                        // 15-35 s depending on frame size, so the deadline
+                        // must cover the WORST frame this modem accepts or
+                        // the ring advances mid-burst and schedules a second
+                        // station on top of an ongoing transmission. One
+                        // frame per turn, always.
+                        autoTurn = Psk31Modem.airtimeMs(Psk31Modem.MAX_FRAME_BYTES)
+                                + 2000;
+                        perFrameMs = autoTurn;
+                        break;
                     default: autoTurn = 6000; perFrameMs = 1100; break;
                 }
                 int effTurn = ringMaxTurn > 0 ? ringMaxTurn : autoTurn;
@@ -828,6 +854,7 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
                 // keep the modem's burst batching aligned with the turn
                 if (ofdm != null) ofdm.setMaxBatchFrames(framesPerTurn);
                 else if (mercury != null) mercury.setMaxBatchFrames(framesPerTurn);
+                else if (psk31 != null) psk31.setMaxBatchFrames(framesPerTurn);
                 else if (modem != null) modem.setMaxBatchFrames(framesPerTurn);
                 sessionDebug("Ring: maxTurn=" + effTurn + " ms, framesPerTurn="
                         + framesPerTurn);
@@ -845,7 +872,7 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
     }
 
     private synchronized void stopRadio() {
-        if (modem != null || ofdm != null || mercury != null) {
+        if (modem != null || ofdm != null || mercury != null || psk31 != null) {
             try {
                 CommsMapComponent.getInstance().registerPreSendProcessor(null);
             } catch (Exception ignored) {}
@@ -858,6 +885,7 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
             if (modem != null)   { modem.stop();   modem = null; }
             if (ofdm != null)    { ofdm.stop();    ofdm = null; }
             if (mercury != null) { mercury.stop(); mercury = null; }
+            if (psk31 != null)   { psk31.stop();   psk31 = null; }
             if (usbPtt != null)  { usbPtt.close(); usbPtt = null; }
             unregisterUsbPermReceiver();
         }
@@ -930,6 +958,8 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
             ofdm.transmit(myCall, frame);
         else if (mercury != null)
             mercury.transmit(myCall, frame);
+        else if (psk31 != null)
+            psk31.transmit(myCall, frame);
         else if (modem != null)
             modem.transmit(DEFAULT_DEST, myCall, new String[0], frame);
         // v0.23: the frame has left for the modem — arm the mesh ARQ's
@@ -960,13 +990,14 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
     private synchronized void engageUsbPtt() {
         if (usbPtt != null) return;
         if (prefs.getInt("tx_output", 0) != 1) return;
-        if (modem == null && ofdm == null && mercury == null) return;
+        if (modem == null && ofdm == null && mercury == null && psk31 == null) return;
         usbPtt = UsbPtt.open(usbContext(), this::log,
                 () -> mainHandler.post(this::recoverUsbPtt));
         if (usbPtt != null) {
             if (modem != null)   modem.setPtt(usbPtt);
             if (ofdm != null)    ofdm.setPtt(usbPtt);
             if (mercury != null) mercury.setPtt(usbPtt);
+            if (psk31 != null)   psk31.setPtt(usbPtt);
             // v0.26: USB TX rides the MEDIA stream for predictable level
             log("PTT: TX audio uses the Media volume on USB \u2014 "
                     + "set Media volume to max");
@@ -986,6 +1017,7 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
             if (modem != null)   modem.setPtt(null);
             if (ofdm != null)    ofdm.setPtt(null);
             if (mercury != null) mercury.setPtt(null);
+            if (psk31 != null)   psk31.setPtt(null);
         }
         engageUsbPtt();
         if (usbPtt == null)
@@ -1001,6 +1033,7 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
         if (modem != null)   modem.setPtt(null);
         if (ofdm != null)    ofdm.setPtt(null);
         if (mercury != null) mercury.setPtt(null);
+        if (psk31 != null)   psk31.setPtt(null);
         log("PTT: Digirig detached \u2014 RTS PTT off (VOX/manual keying)");
     }
 
@@ -1023,9 +1056,11 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
         AudioModem m = modem;
         OfdmModem o = ofdm;
         MercuryModem h = mercury;
+        Psk31Modem p = psk31;
         if (m != null) m.rebindAudio();
         if (o != null) o.rebindAudio();
         if (h != null) h.rebindAudio();
+        if (p != null) p.rebindAudio();
     }
 
     private void registerUsbPermReceiver() {
@@ -1237,9 +1272,11 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
                 AudioModem m = modem;
                 OfdmModem o = ofdm;
                 MercuryModem h = mercury;
+                Psk31Modem p = psk31;
                 if (m != null) return m.isChannelBusy();
                 if (o != null) return o.isChannelBusy();
                 if (h != null) return h.isChannelBusy();
+                if (p != null) return p.isChannelBusy();
                 return false;
             }
             @Override
@@ -1247,9 +1284,11 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
                 AudioModem m = modem;
                 OfdmModem o = ofdm;
                 MercuryModem h = mercury;
+                Psk31Modem p = psk31;
                 if (m != null && m.isTransmitting()) return true;
                 if (o != null && o.isTransmitting()) return true;
-                return h != null && h.isTransmitting();
+                if (h != null && h.isTransmitting()) return true;
+                return p != null && p.isTransmitting();
             }
             @Override
             public java.util.List<String> meshRoster() {
@@ -1456,7 +1495,11 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
                 long minInterval = prefs.getInt("pli_rate_s", 60) * 1000L;
                 RingMac rm = ringMac;
                 if (rm != null) {
-                    long perStation = modemType() == 2 ? 13_000L : 8_000L;
+                    // per-station PLI airtime share: AFSK/OFDM ~8 s,
+                    // Mercury ~13 s, PSK31 ~25 s (a PLI alone is ~15 s on
+                    // air; 25 s/station caps PLIs at ~60% of the rotation)
+                    long perStation = modemType() == 2 ? 13_000L
+                            : modemType() == 3 ? 25_000L : 8_000L;
                     long floor = rm.rosterSize() * perStation;
                     if (floor > minInterval) {
                         minInterval = floor;

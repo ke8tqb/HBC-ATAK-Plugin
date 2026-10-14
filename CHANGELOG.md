@@ -4,6 +4,46 @@ All notable changes to HBC Audio Plugin are documented here.
 
 ---
 
+## [0.28] - PSK31 modem + airtime-aware channel access
+
+### Added
+- **PSK31 modem** (fourth modem option): BPSK 31.25 Bd, ITU-R M.2034
+  Varicode, 1500 Hz carrier, 8000 Hz mono. ~31 Hz occupied bandwidth -
+  fits any SSB channel and survives SNRs below what the OFDM modes
+  tolerate, at the cost of very long bursts (PLI ~16 s, Mode 6 marker
+  ~28 s, max frame ~77 s on air - JVM-measured).
+- **Psk31Armor**: binary mesh frames ride as `~` + Base64(frame +
+  CRC-16/X.25) + `~` text, because Varicode has no error detection.
+  Human PSK31 chatter on frequency is ignored by the de-framer;
+  corrupted frames are rejected by the CRC (never delivered).
+- **codec-test/Psk31LinkTest**: 13 JVM link tests - round trips with
+  noise/frequency offset, corruption rejection, chatter immunity, and
+  airtime-estimate bracketing against real rendered durations.
+
+### Channel access (the decision)
+- No new MAC protocol: CSMA and Ring remain sufficient **provided their
+  time constants are airtime-honest**. The failure mode of reusing the
+  AFSK/OFDM constants would have been structural: Ring's 6 s turn
+  deadline advances mid-burst and schedules the next station on top of
+  a PSK31 transmission still in progress; CSMA's 15 s give-up override
+  fires inside a neighbor's burst. Both are collisions by design, not
+  by chance.
+- Ring on PSK31: auto turn budget derives from the armor's airtime
+  estimator for the largest accepted frame (~94 s deadline), exactly
+  one frame per turn, Guard/Skip unchanged (they track VOX behavior,
+  not payload length).
+- CSMA on PSK31: patience window raised to 90 s (> longest possible
+  neighbor burst).
+- PLI pacing: Ring PLI auto-floor adds a PSK31 tier (25 s/station;
+  AFSK/OFDM 8 s, Mercury 13 s) so N stations' position beacons cannot
+  consume the rotation.
+- Practical guidance: Ring is strongly recommended over CSMA for PSK31
+  with 3+ stations - at these burst lengths the cost of a single
+  collision is ~30 s of airtime, and CSMA's collision probability
+  grows with burst duration while Ring's stays zero by construction.
+
+---
+
 ## [0.27] — Fix TX-queue starvation (stuck carrier sense) + PTT self-recovery + stall alarm
 
 Field findings from the 10-10 RF test: with the Digirig's hot RX line
