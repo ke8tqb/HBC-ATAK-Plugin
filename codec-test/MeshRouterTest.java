@@ -23,6 +23,7 @@ public final class MeshRouterTest {
         testFourNodeAnnounceTrace();
         testDirectForwardAndAck();
         testPassiveLearning();
+        testOwnEchoTeachesRelayer();
         testTxGatedRetry();
         testStuckQueueFails();
         testRetryPolicyHook();
@@ -217,6 +218,26 @@ public final class MeshRouterTest {
                 d.router.routingTableSummary().contains("C1C via C1C (1 hop)"));
         check("relayed origin routable via transmitter",
                 d.router.routingTableSummary().contains("A1A via C1C (2 hops)"));
+    }
+
+    // v0.29: hearing your OWN frame relayed back must still teach the
+    // relayer (it is a direct neighbor transmitting right now). On slow
+    // modems that echo can be the only RX for minutes — dropping it left
+    // one-sided ring rosters in the 10-13 PSK31 field test.
+    private static void testOwnEchoTeachesRelayer() {
+        Node a = new Node("A1A"), b = new Node("B1B");
+        a.router.announceNow();
+        b.router.onRadioFrame(a.lastTx());      // B learns A and relays
+        check("B learned A from the announce",
+                b.router.knownDestinations().contains("A1A"));
+        a.router.onRadioFrame(b.lastTx());      // A hears its own announce back
+        check("A learned relayer B from its own echo",
+                a.router.knownDestinations().contains("B1B"));
+        check("A routes B direct (1 hop)",
+                a.router.routingTableSummary().contains("B1B via B1B (1 hop)"));
+        int aTx = a.txed.size();
+        a.router.tick(System.currentTimeMillis() + 1_000);
+        check("A never re-relays its own announce", a.txed.size() == aTx);
     }
 
     /** One-hop pair with routes learned in both directions. */

@@ -1399,8 +1399,14 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
     // ------------------------------------------------------------------
     @Override
     public void processCotEvent(CotEvent event, String[] toUIDs) {
+        // v0.29: psk31 was missing from this guard, so with the PSK31
+        // modem active EVERY ATAK event (PLI, chat, markers, 911) was
+        // silently dropped here — only mesh-internal frames ever reached
+        // the air (the 10-13 field finding: "Next PLI" never counted
+        // down because no PLI ever passed this line).
         if (!started || mesh == null
-                || (modem == null && ofdm == null && mercury == null)
+                || (modem == null && ofdm == null && mercury == null
+                    && psk31 == null)
                 || !prefs.getBoolean("tx_enable", true))
             return;
         try {

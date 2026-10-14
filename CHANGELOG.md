@@ -4,6 +4,33 @@ All notable changes to HBC Audio Plugin are documented here.
 
 ---
 
+## [0.29] - PSK31 hotfix: ATAK events never transmitted
+
+Field findings from the 10-13 PSK31 bench test (PIX/S26 session logs):
+no PLI ever went out and the "Next PLI" line never counted down.
+
+### Fixed
+- **Nothing from ATAK transmitted on PSK31.** The processCotEvent
+  intake guard still checked only the three older modems, so with
+  PSK31 active every ATAK event (PLI, chat, markers, 911, CASEVAC)
+  was dropped before any logging — only mesh-internal announces and
+  relays reached the air, and "Next PLI" sat at "waiting for ATAK
+  position update" forever (lastPliTxMs never armed). The guard now
+  recognizes Psk31Modem — the one psk31 wiring spot 0.28 missed.
+- **One-sided roster: your own frame relayed back taught nothing.**
+  MeshRouter returned on own-origin frames before learning anything,
+  so PIX hearing its announce relayed by S26 never learned S26 (S26
+  roster 2, PIX roster 1 in the logs). Harmless on fast modems whose
+  PLI traffic teaches within seconds; structural on PSK31 where that
+  echo can be the only RX for minutes. The relaying transmitter is
+  now learned (0-hop neighbor + ring liveness pointer) BEFORE the
+  own-origin return; routing/dedup of the echoed frame itself is
+  unchanged — self frames are still never routed or re-relayed.
+- Tests: MeshRouterTest gains an own-echo-teaches-relayer case
+  (including no-self-rebroadcast); suite green.
+
+---
+
 ## [0.28] - PSK31 modem + airtime-aware channel access
 
 ### Added

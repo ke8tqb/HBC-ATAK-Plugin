@@ -330,27 +330,36 @@ public final class MeshRouter {
             String origin = unpackCallsign(f, 1);
             String transmitter = unpackCallsign(f, 6);
             int seq = ((f[11] & 0xFF) << 8) | (f[12] & 0xFF);
-            if (origin.isEmpty() || origin.equalsIgnoreCase(myCall))
-                return;   // own packet heard back — never route self
+            if (origin.isEmpty())
+                return;
 
-            if (!transmitter.isEmpty() && !transmitter.equalsIgnoreCase(myCall))
+            // The transmitter of this hop is live on the channel and a
+            // direct neighbor (0 hops). Learn that BEFORE the own-origin
+            // return below: hearing our OWN frame relayed back is still
+            // hard proof the relayer exists. On slow modems (PSK31) that
+            // echo can be the only RX for minutes — dropping it left
+            // one-sided ring rosters in the 10-13 field test (v0.29).
+            if (!transmitter.isEmpty() && !transmitter.equalsIgnoreCase(myCall)) {
                 cb.onHeardTransmitter(transmitter);
+                if (type >= TYPE_ANNOUNCE && type <= TYPE_ACK)
+                    learnRoute(transmitter, transmitter, 0);
+            }
+
+            if (origin.equalsIgnoreCase(myCall))
+                return;   // own packet heard back — never route self
 
             String sig = origin + "|" + seq + "|" + type;
             boolean duplicate = checkAndCache(sig);
 
             // Passive route learning: hearing ANY frame is proof of a path.
-            // The transmitter of this hop is a direct neighbor (0 hops), and
-            // for non-announce frames the origin is reachable via that
-            // transmitter. This makes a station selectable as a destination
-            // as soon as we hear a PLI/marker/chat from it — no announce or
-            // prior chat required. (Announces manage the origin themselves.)
-            if (type >= TYPE_ANNOUNCE && type <= TYPE_ACK) {
-                if (!transmitter.isEmpty() && !transmitter.equalsIgnoreCase(myCall))
-                    learnRoute(transmitter, transmitter, 0);
-                if (type != TYPE_ANNOUNCE && !origin.equalsIgnoreCase(transmitter))
-                    learnRoute(origin, transmitter, 1);
-            }
+            // For non-announce frames the origin is also reachable via the
+            // transmitter of this hop. This makes a station selectable as a
+            // destination as soon as we hear a PLI/marker/chat from it — no
+            // announce or prior chat required. (Announces manage the origin
+            // themselves.)
+            if (type >= TYPE_BROADCAST && type <= TYPE_ACK
+                    && !origin.equalsIgnoreCase(transmitter))
+                learnRoute(origin, transmitter, 1);
 
             switch (type) {
                 case TYPE_ANNOUNCE:
