@@ -18,8 +18,7 @@ Get on the air in five minutes:
    ➡️ [`ATAK-Plugin-HBC-ATAK-Plugin-0.29--5.8.0-civ-release.apk`](prebuilt/ATAK-Plugin-HBC-ATAK-Plugin-0.29--5.8.0-civ-release.apk)
    (tap the link, then the **Download raw file** button).
 3. **Install it** — open the downloaded APK on your phone and approve the
-   install (allow "install unknown apps" for your browser/file manager if
-   Android asks).
+   install.
 4. **Load it in ATAK** — ATAK detects the new plugin on next launch
    (or: ATAK menu → Plugins → scan). Tap **Load** when prompted.
 5. **Start the radio link** — ATAK menu (☰) → **Tools** → **HBC Radio** →
@@ -216,4 +215,3 @@ reference implementation are MIT-licensed in the
 
 ---
 
-*Callsign: KE8TQB*
