@@ -68,6 +68,9 @@ public class OfdmModem {
     private final Object txLock = new Object();
     private final CsmaSense csma = new CsmaSense();
 
+    /** Carrier-sense/level telemetry for the Levels tab. */
+    public CsmaSense csma() { return csma; }
+
     // input effects we explicitly disabled; kept referenced while running
     private final List<android.media.audiofx.AudioEffect> rxEffects = new ArrayList<>();
 

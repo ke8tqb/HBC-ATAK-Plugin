@@ -85,6 +85,17 @@
             android:text="@string/hbc_tab_options" />
 
         <Button
+            android:id="@+id/hbc_tab_btn_levels"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:minHeight="0dp"
+            android:paddingTop="7dp"
+            android:paddingBottom="7dp"
+            android:textSize="12sp"
+            android:text="@string/hbc_tab_levels" />
+
+        <Button
             android:id="@+id/hbc_tab_btn_decodes"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
@@ -467,6 +478,148 @@
                     android:textSize="12sp"
                     android:text="@string/hbc_push_rf" />
             </LinearLayout>
+        </LinearLayout>
+    </ScrollView>
+
+    <!-- ============== LEVELS TAB ============== -->
+    <ScrollView
+        android:id="@+id/hbc_tab_levels"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="8dp">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/hbc_lvl_rx_label"
+                android:textStyle="bold" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingTop="4dp">
+
+                <TextView
+                    android:layout_width="80dp"
+                    android:layout_height="wrap_content"
+                    android:text="@string/hbc_lvl_peak" />
+
+                <ProgressBar
+                    android:id="@+id/hbc_lvl_peak"
+                    style="?android:attr/progressBarStyleHorizontal"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:max="100" />
+
+                <TextView
+                    android:id="@+id/hbc_lvl_peak_pct"
+                    android:layout_width="48dp"
+                    android:layout_height="wrap_content"
+                    android:gravity="end"
+                    android:text="@string/hbc_pli_countdown_idle" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:layout_width="80dp"
+                    android:layout_height="wrap_content"
+                    android:text="@string/hbc_lvl_rms" />
+
+                <ProgressBar
+                    android:id="@+id/hbc_lvl_rms"
+                    style="?android:attr/progressBarStyleHorizontal"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:max="100" />
+
+                <TextView
+                    android:id="@+id/hbc_lvl_rms_pct"
+                    android:layout_width="48dp"
+                    android:layout_height="wrap_content"
+                    android:gravity="end"
+                    android:text="@string/hbc_pli_countdown_idle" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:layout_width="80dp"
+                    android:layout_height="wrap_content"
+                    android:text="@string/hbc_lvl_floor" />
+
+                <ProgressBar
+                    android:id="@+id/hbc_lvl_floor"
+                    style="?android:attr/progressBarStyleHorizontal"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:max="100" />
+
+                <TextView
+                    android:id="@+id/hbc_lvl_floor_pct"
+                    android:layout_width="48dp"
+                    android:layout_height="wrap_content"
+                    android:gravity="end"
+                    android:text="@string/hbc_pli_countdown_idle" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/hbc_lvl_rx_detail"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingTop="4dp"
+                android:paddingBottom="8dp"
+                android:textSize="12sp"
+                android:text="@string/hbc_lvl_stopped" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/hbc_lvl_tx_label"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/hbc_lvl_tx_detail"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingTop="4dp"
+                android:paddingBottom="8dp"
+                android:textSize="12sp"
+                android:text="@string/hbc_lvl_stopped" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/hbc_lvl_tips_label"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/hbc_lvl_tips"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingTop="4dp"
+                android:textSize="12sp"
+                android:textColor="#FFB74D"
+                android:text="@string/hbc_lvl_stopped" />
         </LinearLayout>
     </ScrollView>
 

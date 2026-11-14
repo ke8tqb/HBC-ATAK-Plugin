@@ -67,6 +67,9 @@ public class Psk31Modem {
     private final Object txLock = new Object();
     private final CsmaSense csma = new CsmaSense();
 
+    /** Carrier-sense/level telemetry for the Levels tab. */
+    public CsmaSense csma() { return csma; }
+
     private final List<android.media.audiofx.AudioEffect> rxEffects = new ArrayList<>();
 
     public Psk31Modem(Context context, OfdmModem.PayloadListener listener) {

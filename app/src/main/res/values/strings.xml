@@ -33,7 +33,15 @@
     <string name="hbc_log_label">Live Activity Log</string>
     <string name="hbc_tab_audio">Audio Setup</string>
     <string name="hbc_tab_options">Options</string>
+    <string name="hbc_tab_levels">Levels</string>
     <string name="hbc_tab_decodes">Decodes</string>
+    <string name="hbc_lvl_rx_label">Receive</string>
+    <string name="hbc_lvl_tx_label">Transmit</string>
+    <string name="hbc_lvl_tips_label">Suggestions</string>
+    <string name="hbc_lvl_peak">Peak</string>
+    <string name="hbc_lvl_rms">RMS</string>
+    <string name="hbc_lvl_floor">Noise floor</string>
+    <string name="hbc_lvl_stopped">(radio link stopped)</string>
     <string name="hbc_txrx_label">Transmit / Receive</string>
     <string name="hbc_decodes_title">Packet Decodes</string>
     <string name="hbc_decodes_clear">Clear</string>

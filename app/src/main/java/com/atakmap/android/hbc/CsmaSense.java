@@ -58,6 +58,56 @@ public final class CsmaSense {
     private volatile long busyEpisodeStartMs = 0;
     private volatile double noiseFloor = -1;
 
+    // ------------------------------------------------------------------
+    // Live level telemetry for the Levels tab. Purely passive: feed()
+    // already sees every RX chunk (never our own playout), so publishing
+    // a short-window peak/rms plus clip/busy history here gives the UI
+    // meters without touching any modem or any CSMA behavior.
+    // ------------------------------------------------------------------
+    private volatile double lastWinPeak = 0, lastWinRms = 0;
+    private double bktPeak = 0, bktSumSq = 0;
+    private long bktSamples = 0, bktStartMs = 0;
+    private final boolean[] clipRing = new boolean[40];   // 40 x ~250 ms = 10 s
+    private final boolean[] busyRing = new boolean[120];  // 120 x ~250 ms = 30 s
+    private volatile int ringIdx = 0;
+    private volatile long lastFeedMs = 0;
+
+    /** Peak of the last completed ~250 ms window (0..1). */
+    public double levelPeak() { return lastWinPeak; }
+
+    /** RMS of the last completed ~250 ms window (0..1). */
+    public double levelRms() { return lastWinRms; }
+
+    /** Learned background-noise RMS (0..1); 0 until seeded. */
+    public double noiseFloorRms() {
+        double f = noiseFloor;
+        return f < 0 ? 0 : f;
+    }
+
+    /** Fraction of the last ~10 s whose windows peaked at full scale. */
+    public double clipFraction() {
+        int len = Math.min(ringIdx, clipRing.length);
+        if (len == 0) return 0;
+        int c = 0;
+        for (int i = 0; i < len; i++) if (clipRing[i]) c++;
+        return (double) c / len;
+    }
+
+    /** Fraction of the last ~30 s sensed busy. */
+    public double busyFraction() {
+        int len = Math.min(ringIdx, busyRing.length);
+        if (len == 0) return 0;
+        int c = 0;
+        for (int i = 0; i < len; i++) if (busyRing[i]) c++;
+        return (double) c / len;
+    }
+
+    /** Milliseconds since the last RX audio chunk; MAX_VALUE if never. */
+    public long msSinceAudio() {
+        long t = lastFeedMs;
+        return t == 0 ? Long.MAX_VALUE : System.currentTimeMillis() - t;
+    }
+
     /** Forget the learned noise floor (RX device changed — v0.27). */
     public void reset() {
         noiseFloor = -1;
@@ -69,11 +119,33 @@ public final class CsmaSense {
     public void feed(short[] pcm, int n) {
         if (pcm == null || n <= 0) return;
         double sum = 0;
+        double pk = 0;
         for (int i = 0; i < n; i++) {
             double v = pcm[i] / 32768.0;
             sum += v * v;
+            double a = v < 0 ? -v : v;
+            if (a > pk) pk = a;
         }
         double rms = Math.sqrt(sum / n);
+
+        // Levels-tab telemetry (~250 ms wall-clock buckets); passive only.
+        long nowTele = System.currentTimeMillis();
+        lastFeedMs = nowTele;
+        if (bktStartMs == 0) bktStartMs = nowTele;
+        bktSumSq += sum;
+        bktSamples += n;
+        if (pk > bktPeak) bktPeak = pk;
+        if (nowTele - bktStartMs >= 250 && bktSamples > 0) {
+            lastWinPeak = bktPeak;
+            lastWinRms = Math.sqrt(bktSumSq / bktSamples);
+            clipRing[ringIdx % clipRing.length] = bktPeak >= 0.99;
+            busyRing[ringIdx % busyRing.length] = isBusy();
+            ringIdx++;
+            bktPeak = 0;
+            bktSumSq = 0;
+            bktSamples = 0;
+            bktStartMs = nowTele;
+        }
 
         double floor = noiseFloor;
         if (floor < 0) {           // first chunk: seed the floor

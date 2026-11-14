@@ -86,6 +86,9 @@ public class AudioModem {
     private final Object txLock = new Object();
     private final CsmaSense csma = new CsmaSense();
 
+    /** Carrier-sense/level telemetry for the Levels tab. */
+    public CsmaSense csma() { return csma; }
+
     // RX diagnostics: when the carrier sense heard a signal but the
     // demodulator produced no frame, say so (helps separate "no audio"
     // from "audio present but undecodable" in the field).

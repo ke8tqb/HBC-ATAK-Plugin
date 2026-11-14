@@ -17,6 +17,7 @@ import com.atak.plugins.impl.PluginLayoutInflater;
 import com.atakmap.android.cot.CotMapComponent;
 import com.atakmap.android.hbc.AudioModem;
 import com.atakmap.android.hbc.BridgePolicy;
+import com.atakmap.android.hbc.CsmaSense;
 import com.atakmap.android.hbc.HbcDecoder;
 import com.atakmap.android.hbc.HbcEncoder;
 import com.atakmap.android.hbc.Ita2;
@@ -120,11 +121,17 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
     private Button btnStartStop;
     private TextView tvStatus, tvLog, tvPliCountdown;
     private boolean pliTickerRunning = false;
-    private View tabAudio, tabOptions, tabDecodes;
+    private View tabAudio, tabOptions, tabDecodes, tabLevels;
     private View headerView, tabBarView;
     private int lastConfigTab = 0;   // tab to return to from the Decodes page
-    private Button btnTabAudio, btnTabOptions, btnTabDecodes, btnDecodesClear,
-            btnDecodesBack;
+    private Button btnTabAudio, btnTabOptions, btnTabDecodes, btnTabLevels,
+            btnDecodesClear, btnDecodesBack;
+
+    // Levels tab (live meters + advice)
+    private android.widget.ProgressBar pbLvlPeak, pbLvlRms, pbLvlFloor;
+    private TextView tvLvlPeakPct, tvLvlRmsPct, tvLvlFloorPct,
+            tvLvlRxDetail, tvLvlTxDetail, tvLvlTips;
+    private boolean levelTickerRunning = false;
     private TextView tvDecodes, tvDecodesCount;
     private android.widget.ScrollView svDecodes;
     private int decodeCount = 0;
@@ -265,9 +272,11 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
         tabAudio      = v.findViewById(R.id.hbc_tab_audio);
         tabOptions    = v.findViewById(R.id.hbc_tab_options);
         tabDecodes    = v.findViewById(R.id.hbc_tab_decodes);
+        tabLevels     = v.findViewById(R.id.hbc_tab_levels);
         btnTabAudio   = v.findViewById(R.id.hbc_tab_btn_audio);
         btnTabOptions = v.findViewById(R.id.hbc_tab_btn_options);
         btnTabDecodes = v.findViewById(R.id.hbc_tab_btn_decodes);
+        btnTabLevels  = v.findViewById(R.id.hbc_tab_btn_levels);
         btnDecodesBack = v.findViewById(R.id.hbc_decodes_back);
 
         btnStartStop.setOnClickListener(view -> {
@@ -284,6 +293,8 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
         btnTabAudio.setOnClickListener(view -> selectTab(0));
         btnTabOptions.setOnClickListener(view -> selectTab(1));
         btnTabDecodes.setOnClickListener(view -> selectTab(2));
+        if (btnTabLevels != null)
+            btnTabLevels.setOnClickListener(view -> selectTab(3));
         if (btnDecodesBack != null)
             btnDecodesBack.setOnClickListener(view -> selectTab(lastConfigTab));
         selectTab(0);
@@ -335,6 +346,17 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
         if (tvLog != null)
             tvLog.setMovementMethod(new ScrollingMovementMethod());
         startPliTicker();
+
+        pbLvlPeak     = v.findViewById(R.id.hbc_lvl_peak);
+        pbLvlRms      = v.findViewById(R.id.hbc_lvl_rms);
+        pbLvlFloor    = v.findViewById(R.id.hbc_lvl_floor);
+        tvLvlPeakPct  = v.findViewById(R.id.hbc_lvl_peak_pct);
+        tvLvlRmsPct   = v.findViewById(R.id.hbc_lvl_rms_pct);
+        tvLvlFloorPct = v.findViewById(R.id.hbc_lvl_floor_pct);
+        tvLvlRxDetail = v.findViewById(R.id.hbc_lvl_rx_detail);
+        tvLvlTxDetail = v.findViewById(R.id.hbc_lvl_tx_detail);
+        tvLvlTips     = v.findViewById(R.id.hbc_lvl_tips);
+        startLevelTicker();
 
         tvDecodes      = v.findViewById(R.id.hbc_decodes);
         tvDecodesCount = v.findViewById(R.id.hbc_decodes_count);
@@ -496,9 +518,9 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
     }
 
     /**
-     * 0 = Audio Setup, 1 = Options, 2 = Decodes. The Decodes view is a
-     * full-panel page: it hides the header and tab bar and is left via
-     * its own Back button (returns to the last config tab).
+     * 0 = Audio Setup, 1 = Options, 2 = Decodes, 3 = Levels. The Decodes
+     * view is a full-panel page: it hides the header and tab bar and is
+     * left via its own Back button (returns to the last config tab).
      */
     private void selectTab(int tab) {
         if (tabAudio == null) return;
@@ -511,9 +533,138 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
         tabAudio.setVisibility(tab == 0 ? View.VISIBLE : View.GONE);
         tabOptions.setVisibility(tab == 1 ? View.VISIBLE : View.GONE);
         tabDecodes.setVisibility(fullPage ? View.VISIBLE : View.GONE);
+        if (tabLevels != null)
+            tabLevels.setVisibility(tab == 3 ? View.VISIBLE : View.GONE);
         btnTabAudio.setEnabled(tab != 0);
         btnTabOptions.setEnabled(tab != 1);
         btnTabDecodes.setEnabled(tab != 2);
+        if (btnTabLevels != null)
+            btnTabLevels.setEnabled(tab != 3);
+    }
+
+    // ------------------------------------------------------------------
+    // Levels tab: live RX meters from the active modem's carrier sense
+    // plus a small rules engine that suggests level fixes.
+    // ------------------------------------------------------------------
+    private CsmaSense activeCsma() {
+        OfdmModem o = ofdm;
+        if (o != null) return o.csma();
+        AudioModem a = modem;
+        if (a != null) return a.csma();
+        MercuryModem m = mercury;
+        if (m != null) return m.csma();
+        Psk31Modem p = psk31;
+        if (p != null) return p.csma();
+        return null;
+    }
+
+    private void startLevelTicker() {
+        if (levelTickerRunning) return;
+        levelTickerRunning = true;
+        mainHandler.post(new Runnable() {
+            @Override
+            public void run() {
+                updateLevels();
+                mainHandler.postDelayed(this, 300);
+            }
+        });
+    }
+
+    private void updateLevels() {
+        if (tabLevels == null || tvLvlTips == null) return;
+        if (tabLevels.getVisibility() != View.VISIBLE) return; // tab hidden: skip
+        CsmaSense c = started ? activeCsma() : null;
+        if (c == null) {
+            if (pbLvlPeak != null) pbLvlPeak.setProgress(0);
+            if (pbLvlRms != null) pbLvlRms.setProgress(0);
+            if (pbLvlFloor != null) pbLvlFloor.setProgress(0);
+            if (tvLvlPeakPct != null) tvLvlPeakPct.setText("\u2014");
+            if (tvLvlRmsPct != null) tvLvlRmsPct.setText("\u2014");
+            if (tvLvlFloorPct != null) tvLvlFloorPct.setText("\u2014");
+            if (tvLvlRxDetail != null)
+                tvLvlRxDetail.setText(pluginContext.getString(R.string.hbc_lvl_stopped));
+            if (tvLvlTxDetail != null)
+                tvLvlTxDetail.setText(pluginContext.getString(R.string.hbc_lvl_stopped));
+            tvLvlTips.setTextColor(0xFFFFB74D);
+            tvLvlTips.setText("\u2022 Start the radio link to see live levels.");
+            return;
+        }
+        double peak = c.levelPeak(), rms = c.levelRms(), floor = c.noiseFloorRms();
+        if (pbLvlPeak != null) pbLvlPeak.setProgress((int) Math.min(100, peak * 100));
+        if (pbLvlRms != null) pbLvlRms.setProgress((int) Math.min(100, rms * 100));
+        if (pbLvlFloor != null) pbLvlFloor.setProgress((int) Math.min(100, floor * 100));
+        if (tvLvlPeakPct != null)
+            tvLvlPeakPct.setText(String.format(Locale.US, "%.0f%%", peak * 100));
+        if (tvLvlRmsPct != null)
+            tvLvlRmsPct.setText(String.format(Locale.US, "%.0f%%", rms * 100));
+        if (tvLvlFloorPct != null)
+            tvLvlFloorPct.setText(String.format(Locale.US, "%.1f%%", floor * 100));
+        if (tvLvlRxDetail != null)
+            tvLvlRxDetail.setText(String.format(Locale.US,
+                    "Channel: %s \u00b7 busy %.0f%% of last 30 s \u00b7 "
+                            + "clipping %.0f%% of last 10 s",
+                    c.isBusy() ? "BUSY" : "clear",
+                    c.busyFraction() * 100, c.clipFraction() * 100));
+        if (tvLvlTxDetail != null) {
+            String[] modems = {"AX.25/AFSK1200", "OFDM (Rattlegram)",
+                    "Mercury HF", "PSK31"};
+            int mt = prefs.getInt("modem_type", 1);
+            int txOut = prefs.getInt("tx_output", 0);
+            int depth;
+            synchronized (ringPending) { depth = ringPending.size(); }
+            AudioModem am = modem; OfdmModem om = ofdm;
+            MercuryModem mm = mercury; Psk31Modem pm = psk31;
+            if (am != null) depth += am.queuedFrames();
+            if (om != null) depth += om.queuedFrames();
+            if (mm != null) depth += mm.queuedFrames();
+            if (pm != null) depth += pm.queuedFrames();
+            tvLvlTxDetail.setText(String.format(Locale.US,
+                    "%s \u00b7 %s\nVOX Lead %d ms \u00b7 Dwell %d ms \u00b7 "
+                            + "TX queue: %d frame(s)",
+                    mt >= 0 && mt < modems.length ? modems[mt] : "?",
+                    txOut == 1 ? "USB + RTS PTT (Digirig)" : "Speaker / VOX",
+                    prefs.getInt("vox_leader_ms", 0),
+                    prefs.getInt("dwell_ms", 500), depth));
+        }
+        String tips = buildLevelTips(c);
+        boolean good = tips.startsWith("\u2022 Levels look good");
+        tvLvlTips.setTextColor(good ? 0xFF00E676 : 0xFFFFB74D);
+        tvLvlTips.setText(tips);
+    }
+
+    private String buildLevelTips(CsmaSense c) {
+        if (c.msSinceAudio() > 3000)
+            return "\u2022 No RX audio is reaching the modem \u2014 check the "
+                    + "mic/USB audio device and ATAK's microphone permission.";
+        StringBuilder sb = new StringBuilder();
+        if (c.clipFraction() > 0.5)
+            sb.append("\u2022 Input is CLIPPING (peak pinned at 100%). Lower "
+                    + "the radio volume into the phone/Digirig \u2014 clipped "
+                    + "audio breaks decoding even when sync is seen.\n");
+        if (c.noiseFloorRms() > 0.10)
+            sb.append(String.format(Locale.US,
+                    "\u2022 Idle input is very hot (noise floor %.0f%% rms). "
+                            + "Close the radio squelch or lower its volume until "
+                            + "idle is under ~10%%.\n", c.noiseFloorRms() * 100));
+        if (c.busyFraction() > 0.8)
+            sb.append(String.format(Locale.US,
+                    "\u2022 Channel sensed busy %.0f%% of the last 30 s \u2014 "
+                            + "transmissions are being delayed (open squelch or "
+                            + "constant interference, not real traffic).\n",
+                    c.busyFraction() * 100));
+        if (c.levelRms() < 0.005 && c.noiseFloorRms() < 0.003)
+            sb.append("\u2022 RX audio is near-silent. Raise the radio volume "
+                    + "slightly (a received burst should clearly move the "
+                    + "meters) and check the audio path.\n");
+        int txOut = prefs.getInt("tx_output", 0);
+        int voxMs = prefs.getInt("vox_leader_ms", 0);
+        if (txOut == 0 && voxMs == 0)
+            sb.append("\u2022 VOX keying with 0 ms VOX Lead \u2014 the radio "
+                    + "will clip the start of every burst. Set VOX Lead to "
+                    + "250\u2013500 ms.\n");
+        if (sb.length() == 0)
+            return "\u2022 Levels look good \u2014 no changes suggested.";
+        return sb.toString().trim();
     }
 
     private void loadPrefs() {
