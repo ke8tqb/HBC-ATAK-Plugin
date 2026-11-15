@@ -1,6 +1,29 @@
-﻿# Changelog
+# Changelog
 
 All notable changes to HBC Audio Plugin are documented here.
+
+---
+
+## [0.31] - Ring MAC: slower, backing-off DM retry pacing
+
+Field finding from the 11-15 WinTAK interop session: a DM was
+delivered on its FIRST copy, but the sender re-transmitted it 3 times
+and then declared "direct to COMP FAILED (no ack after 3 retries)" —
+and the recipient's queued mesh ACK and Mode 0 delivered/read
+receipts arrived 45+ s late or were lost in the congestion.
+
+### Fixed
+- **Retries starved the ring they were waiting on.** The v0.23 pacing
+  (1.25x measured rotation, min 8 s) is far too aggressive on a small
+  ring: with 2 stations the cycle measures ~8 s, so the sender took
+  nearly every rotation for another copy of the same DM, and the
+  recipient's turn (carrying the ACK back) kept getting pushed out.
+  Retry pacing is now multi-rotation with per-attempt backoff —
+  2x, 3x, then 4x the measured cycle (min 15 s, cap 120 s, +0-3 s
+  jitter) — so the far station always gets clear turns between
+  copies. Total ARQ patience roughly doubles; the duplicate-Direct
+  re-ACK path (unchanged) still covers a genuinely lost ACK.
+- CSMA pacing unchanged (5 s + jitter). No wire-format changes.
 
 ---
 

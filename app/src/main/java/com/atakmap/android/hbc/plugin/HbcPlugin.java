@@ -954,13 +954,22 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
             // retry is pointless until at least one full rotation has
             // passed (the ACK needs the recipient's own turn to travel
             // back); under CSMA the classic 5 s + jitter stays.
+            //
+            // v0.31 (11-15 field finding): cycle*1.25 paced retries so
+            // fast on a small ring (~8 s with 2 stations) that the
+            // retries THEMSELVES held the rotation and starved the
+            // recipient's turn — the DM was delivered on the first copy
+            // but its ACK (and the Mode 0 receipts queued behind it)
+            // could not return inside 3 retries (~35 s). Wait multiple
+            // rotations and back off per attempt (2x, 3x, 4x cycle) so
+            // the far station always gets clear turns between copies.
             mesh.setRetryPolicy(tries -> {
                 RingMac rm = ringMac;
                 if (rm != null) {
-                    long cycle = rm.measuredCycleMs();
-                    long d = Math.max(8_000L, cycle + cycle / 4);
-                    return Math.min(60_000L, d)
-                            + (long) (Math.random() * 2000);
+                    long cycle = Math.max(6_000L, rm.measuredCycleMs());
+                    long d = cycle * (2 + Math.max(0, tries));
+                    return Math.max(15_000L, Math.min(120_000L, d))
+                            + (long) (Math.random() * 3000);
                 }
                 return 5_000L + (long) (Math.random() * 2000);
             });
