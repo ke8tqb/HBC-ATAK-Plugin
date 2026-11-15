@@ -57,6 +57,15 @@ final class UsbPtt implements PttKeyer {
     static final String ACTION_USB_PERMISSION =
             "com.atakmap.android.hbc.USB_PERMISSION";
 
+    // v0.33: a flapping USB link (bad cable/connector/OTG power) fires
+    // ATTACHED on every re-enumeration, and Android revokes the USB
+    // permission on each detach — so each flap re-raised the system
+    // permission dialog ("popup appears with no cable change", 11-15
+    // field report). Rate-limit the prompts so a flapping link cannot
+    // storm dialogs over ATAK.
+    private static final long PERM_PROMPT_MIN_INTERVAL_MS = 10_000L;
+    private static volatile long lastPermPromptMs = 0;
+
     /** Status sink (the plugin's Activity Log). */
     interface Status {
         void log(String message);
@@ -135,6 +144,13 @@ final class UsbPtt implements PttKeyer {
                 return null;
             }
             if (!um.hasPermission(found)) {
+                long nowMs = android.os.SystemClock.elapsedRealtime();
+                if (nowMs - lastPermPromptMs < PERM_PROMPT_MIN_INTERVAL_MS) {
+                    status.log("PTT: USB permission dialog already pending "
+                            + "\u2014 not re-prompting (flap suppressed)");
+                    return null;
+                }
+                lastPermPromptMs = nowMs;
                 try {
                     // The intent MUST be explicit (setPackage): since
                     // Android 14 a mutable PendingIntent around an implicit

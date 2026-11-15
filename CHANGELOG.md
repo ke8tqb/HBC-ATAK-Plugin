@@ -4,6 +4,26 @@ All notable changes to HBC Audio Plugin are documented here.
 
 ---
 
+## [0.33] - USB flap hardening: no permission-dialog storms + flap diagnostics
+
+Field report 11-15: the Digirig permission popup appeared repeatedly
+with no physical plug event, and the phone rebooted right as the
+popup appeared (3x). USB code is unchanged since 0.25; the popups
+without plug events mean the USB link is RE-ENUMERATING electrically
+(cable/connector/OTG power) — Android revokes USB permission on every
+detach, so each flap legitimately re-raised the dialog. A device
+reboot at that moment points at VBUS/OTG power sag, not app code.
+
+### Changed
+- **Permission prompts rate-limited** (min 10 s apart): a flapping
+  link can no longer storm system dialogs over ATAK; the Activity Log
+  shows "flap suppressed" instead.
+- **Flap called out in the log**: an ATTACHED broadcast within 30 s of
+  the previous one logs "USB re-enumerated N s after the last attach -
+  the link is FLAPPING (check cable/connector/OTG power)".
+
+---
+
 ## [0.32] - Manual "Send PLI" comms-check button
 
 ### Added

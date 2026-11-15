@@ -118,6 +118,10 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
     // receiver that engages it as soon as the user taps Allow
     private UsbPtt usbPtt;
     private android.content.BroadcastReceiver usbPermReceiver;
+    // v0.33 flap diagnostics: time of the last USB ATTACHED broadcast, to
+    // call out electrical link flapping (re-enumeration with no physical
+    // plug event) directly in the Activity Log.
+    private volatile long lastUsbAttachMs = 0;
     private Button btnStartStop;
     private Button btnSendPli;
     /// Most recent own-position SA event, cached BEFORE the PLI rate
@@ -1240,6 +1244,21 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
                     String action = intent.getAction();
                     if (android.hardware.usb.UsbManager
                             .ACTION_USB_DEVICE_ATTACHED.equals(action)) {
+                        // v0.33 flap diagnostics: ATTACHED again shortly
+                        // after the previous one means the link is
+                        // re-enumerating ELECTRICALLY (no physical plug
+                        // event) — bad cable/connector or OTG power sag.
+                        // Surface it loudly: this is also the failure mode
+                        // that can brown-out/reboot the phone itself.
+                        long nowMs = android.os.SystemClock.elapsedRealtime();
+                        long sinceMs = lastUsbAttachMs == 0
+                                ? Long.MAX_VALUE : nowMs - lastUsbAttachMs;
+                        lastUsbAttachMs = nowMs;
+                        if (sinceMs < 30_000)
+                            log("PTT: USB re-enumerated " + (sinceMs / 1000)
+                                    + " s after the last attach \u2014 the link "
+                                    + "is FLAPPING (check cable/connector/OTG "
+                                    + "power, not the plugin)");
                         // Hot-plug while running: re-open RX capture so it
                         // follows the new device (v0.26), and engage PTT
                         // when the attached device is a Digirig keyer.
