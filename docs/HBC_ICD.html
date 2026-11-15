@@ -35,7 +35,7 @@
   <h1>HBC RADIO</h1>
   <div class="sub">ATAK Plugin &mdash; Interface Control Document</div>
   <div class="sub">Ham Binary CoT over Distance-Vector Mesh Radio</div>
-  <div class="contact">Version 1.8 &nbsp;|&nbsp; KE8TQB &nbsp;|&nbsp; github.com/ke8tqb/HBC-ATAK-Plugin</div>
+<div class="contact">Version 1.9 &nbsp;|&nbsp; KE8TQB &nbsp;|&nbsp; github.com/ke8tqb/HBC-ATAK-Plugin</div>
 </div>
 
 <div class="toc">
@@ -84,8 +84,9 @@
       <li>6.1 &nbsp;Screen-by-Screen Figures</li>
       <li>6.2 &nbsp;Every Control and What It Does</li>
       <li>6.3 &nbsp;Toolbar Icons</li>
-      <li>6.4 &nbsp;Reading the Activity Log</li>
-      <li>6.5 &nbsp;Reading the Decodes Log</li>
+  <li>6.4 &nbsp;Reading the Activity Log</li>
+  <li>6.5 &nbsp;Reading the Decodes Log</li>
+  <li>6.6 &nbsp;Reading the Levels Tab</li>
     </ol>
   </li>
   <li>Timing Parameters and Constants</li>
@@ -97,6 +98,7 @@
 <h2>Revision History</h2>
 <table>
   <tr><th>ICD rev</th><th>Date</th><th>Summary of changes</th></tr>
+  <tr><td>1.9</td><td>Nov 2026</td><td>Plugin v0.30&ndash;v0.33: added the Levels tab (live RX meters + suggestions, sections 6.1/6.6), the manual Send PLI comms-check button, multi-rotation Ring retry pacing (section 4.9), USB flap hardening and its log lines (section 6.4), and the READ-supersedes-DELIVERED receipt interop note (section 5.4). Screenshot set refreshed to the v0.33 four-tab UI.</td></tr>
   <tr><td>1.8</td><td>Oct 2026</td><td>Added the PSK31 modem (section 3.4), its airtime-scaled channel-access values throughout, and the new modem-selector figure. Document made fully self-contained: feature history is consolidated here instead of inline version notes.</td></tr>
   <tr><td>1.7</td><td>Oct 2026</td><td>Added the TX output / hardware-PTT selector (Digirig RTS and GPIO keying), USB hot-plug receive recovery and USB TX-level guidance; refreshed the full screenshot set.</td></tr>
   <tr><td>1.6</td><td>Oct 2026</td><td>Added the C2 Bridge one-way RF &rarr; network data diode (section 2.1) and its Push to RF workflow.</td></tr>
@@ -451,9 +453,13 @@ retried. Two refinements let this ARQ coexist with a queueing MAC (the Ring):</p
       the original is still queued only duplicates it in the same queue. A pending whose
       copies never reach the air at all is failed after 3 minutes (stuck-queue safety).</li>
   <li><b>Retry pacing follows the channel-access mode.</b> CSMA: 5 s + 0&ndash;2 s random
-      jitter (the original behavior). Ring: at least 1.25&times; the measured rotation time
-      (minimum 8 s, capped at 60 s) &mdash; an ACK cannot return before the recipient&rsquo;s
-      own turn comes around, so earlier retries are pure overhead.</li>
+      jitter (the original behavior). Ring (v0.31): <b>multiple rotations with per-attempt
+      backoff</b> &mdash; 2&times;, then 3&times;, then 4&times; the measured rotation time
+      (minimum 15 s, capped at 120 s, +0&ndash;3 s jitter). An ACK cannot return before the
+      recipient&rsquo;s own turn comes around, and the 11-15 field test showed faster pacing
+      is self-defeating on a small ring: the sender&rsquo;s retries themselves occupied the
+      rotation and starved the recipient&rsquo;s return turn, failing a DM that had in fact
+      been delivered on its first copy.</li>
 </ul>
 <p>Chat delivered/read receipts (section 5.4) are sent as <b>unacknowledged Directs</b>:
 identical on the wire, but with no retries and no failure verdict &mdash; a lost
@@ -513,6 +519,11 @@ the tag to the original messageId and injects the receipt, so ATAK&rsquo;s famil
 delivered/read checkmarks work end-to-end over radio. These application-level receipts are
 separate from (and in addition to) the mesh-layer ACKs of section 4.6. They are carried as
 unacknowledged Directs (section 4.9) &mdash; best-effort by design.</p>
+<div class="note"><b>Interop note:</b> a receiving station may send a READ receipt
+<i>without</i> a preceding DELIVERED when the message was read immediately (the WinTAK
+plugin v0.6.3+ deliberately skips the redundant DELIVERED in that case &mdash; reading
+implies delivery, and one Mode 0 frame costs half the ack airtime of two). Treat an
+incoming READ as delivered+read.</div>
 
 <h3>5.5 Contact Publication</h3>
 <p>ATAK only lists a station in its chat/contact pickers when that station&rsquo;s position
@@ -526,12 +537,14 @@ intercepted by the plugin and transmitted over the mesh.</p>
 <h2>6. User Interface Reference (Screenshots)</h2>
 <p>All configuration lives in one pane, opened from the HBC Radio entry in ATAK&rsquo;s
 Tools menu (Figure 1). This section shows each screen (6.1), explains every control (6.2)
-and toolbar icon (6.3), and teaches how to read the two logs (6.4, 6.5). Red boxes and
-numbered markers in the figures point at the controls each caption describes.</p>
+and toolbar icon (6.3), and teaches how to read the two logs (6.4, 6.5) and the live
+Levels tab (6.6). Red boxes and numbered markers in the figures point at the controls
+each caption describes.</p>
 <h3>6.1 Screen-by-Screen Figures</h3>
-<p>All figures show the plugin pane: three tabs (<b>Audio Setup</b>, <b>Options</b>,
-<b>Decodes</b>) under a slim always-visible header carrying the colored status line,
-the build stamp and the Start/Stop button.</p>
+<p>All figures show the plugin pane (v0.33): four tabs (<b>Audio Setup</b>, <b>Options</b>,
+<b>Levels</b>, <b>Decodes</b>) under a slim always-visible header carrying the colored
+status line, the build stamp, and the stacked <b>Start/Stop</b> and <b>Send PLI</b>
+buttons.</p>
 
 <div class="figure">
   <img src="images/v026_fig01_tools.jpg" alt="ATAK Tools menu with the HBC Radio entry">
@@ -541,11 +554,12 @@ the build stamp and the Start/Stop button.</p>
 </div>
 
 <div class="figure">
-  <img src="images/v026_fig02_audio_top.jpg" alt="Audio Setup tab, top half">
-  <div class="cap">Figure 2 &mdash; Audio Setup tab, top. &#9312; status line (red
-  STOPPED / green RUNNING) with the build stamp beneath it; &#9313; tab bar with the
-  always-visible Start/Stop button at its right; &#9314; Modem selector (must match on
-  all stations); &#9315; TX audio stream; &#9316; TX output / PTT (section 6.2).</div>
+  <img src="images/v033_fig02_audio_top.jpg" alt="Audio Setup tab, top half">
+  <div class="cap">Figure 2 &mdash; Audio Setup tab, top (v0.33). The header carries the
+  status line (red STOPPED / green RUNNING) with the build stamp beneath it and the
+  stacked <b>Start Radio Link</b> / <b>Send PLI</b> buttons; below it the four-tab bar
+  (Audio Setup, Options, Levels, Decodes), then the Modem selector (must match on all
+  stations) and TX audio stream (section 6.2).</div>
 </div>
 
 <div class="figure">
@@ -564,60 +578,81 @@ the build stamp and the Start/Stop button.</p>
 </div>
 
 <div class="figure">
-  <img src="images/v026_fig05_tx_output.jpg" alt="TX output / PTT selector expanded">
-  <div class="cap">Figure 5 &mdash; TX output / PTT expanded (boxed): Speaker &mdash;
-  VOX / acoustic coupling (default), or USB + RTS PTT for Digirig-class interfaces,
-  where the plugin keys the radio electrically (sections 6.2 and 3.6).</div>
+  <img src="images/v033_fig05_tx_output.jpg" alt="TX output / PTT selector">
+  <div class="cap">Figure 5 &mdash; TX output / PTT: Speaker &mdash; VOX / acoustic
+  coupling (default), or USB + RTS PTT for Digirig-class interfaces, where the plugin
+  keys the radio electrically (sections 6.2 and 3.6). The AFSK TX level field beneath it
+  applies to the AX.25 modem only.</div>
 </div>
 
 <div class="figure">
-  <img src="images/v026_fig06_audio_lower.jpg" alt="Audio Setup tab, lower half">
-  <div class="cap">Figure 6 &mdash; Audio Setup, lower half. &#9312; AFSK TX level %
-  (AX.25 modem only); &#9313; TX Dwell and VOX Lead; &#9314; Channel access selector
-  with the &#9432; UV-5R / FT-65 defaults link (boxed) that opens the radio-profile
-  dialog (section 3.6).</div>
+  <img src="images/v033_fig06_audio_lower.jpg" alt="Audio Setup tab, lower half">
+  <div class="cap">Figure 6 &mdash; Audio Setup, lower half: AFSK TX level %, TX Dwell
+  and VOX Lead, and the Channel access section with the &#9432; UV-5R / FT-65 defaults
+  link that opens the radio-profile dialog (section 3.6).</div>
 </div>
 
 <div class="figure">
-  <img src="images/v026_fig07_channel_access.jpg" alt="Channel access selector expanded">
-  <div class="cap">Figure 7 &mdash; Channel access expanded: CSMA (contention,
-  section 3.5) or Ring (deterministic turns, section 3.6), with the Guard / Skip /
-  Max-turn fields beneath (boxed).</div>
+  <img src="images/v033_fig07_channel_access.jpg" alt="Channel access selector and ring timing fields">
+  <div class="cap">Figure 7 &mdash; Channel access (must match on all stations): CSMA
+  (contention, section 3.5) or Ring (deterministic turns, section 3.6), with the
+  Guard / Skip / Max-turn fields beneath.</div>
 </div>
 
 <div class="figure">
-  <img src="images/v026_fig08_options_top.jpg" alt="Options tab, top half">
-  <div class="cap">Figure 8 &mdash; Options tab, top. &#9312; Ham callsign (required
-  before starting); &#9313; Send-to destination &mdash; Broadcast (everyone) or any
-  station learned by the mesh (section 4.7); &#9314; PLI min s rate limit.</div>
+  <img src="images/v033_fig08_options_top.jpg" alt="Options tab, top half">
+  <div class="cap">Figure 8 &mdash; Options tab, top: Ham callsign (required before
+  starting), the Send-to destination &mdash; Broadcast (everyone) or any station learned
+  by the mesh (section 4.7) &mdash; and the PLI min s rate limit.</div>
 </div>
 
 <div class="figure">
-  <img src="images/v026_fig09_options_bottom.jpg" alt="Options tab, bottom half">
-  <div class="cap">Figure 9 &mdash; Options tab, bottom. &#9312; Transmit / Receive
-  master switches; &#9313; per-type transmit filters (the HBC modes of section 5.2);
-  &#9314; the C2 Bridge checkbox with its Push to RF&hellip; button (boxed) &mdash; the
-  one-way data diode of section 2.1.</div>
+  <img src="images/v033_fig08b_options_mid.jpg" alt="Options tab, middle">
+  <div class="cap">Figure 9 &mdash; Options tab, middle: PLI min s, the Transmit /
+  Receive master switches, and the first row of per-type transmit filters (the HBC
+  modes of section 5.2).</div>
 </div>
 
 <div class="figure">
-  <img src="images/v026_fig10_decodes.jpg" alt="Decodes full-panel page, empty">
-  <div class="cap">Figure 10 &mdash; The Decodes page takes over the whole pane:
-  &#9664; Back (boxed, left) returns to the last settings tab, Clear (boxed, right)
-  resets the counter; the Packet Decodes list sits above the Live Activity Log
+  <img src="images/v033_fig09_options_bottom.jpg" alt="Options tab, bottom half">
+  <div class="cap">Figure 10 &mdash; Options tab, bottom: the per-type transmit filters
+  and the C2 Bridge checkbox with its Push to RF&hellip; button &mdash; the one-way data
+  diode of section 2.1.</div>
+</div>
+
+<div class="figure">
+  <img src="images/v033_fig14_levels_top.jpg" alt="Levels tab, meters">
+  <div class="cap">Figure 11 &mdash; The Levels tab (v0.30), Receive section: live
+  Peak / RMS / Noise-floor meters fed from the active modem&rsquo;s carrier sense, with
+  the Transmit status beneath (section 6.6).</div>
+</div>
+
+<div class="figure">
+  <img src="images/v033_fig15_levels_tips.jpg" alt="Levels tab, suggestions">
+  <div class="cap">Figure 12 &mdash; The Levels tab, Suggestions: a rules engine that
+  names the exact level fix (clipping, open squelch, saturated carrier sense, silent RX
+  path, 0 ms VOX Lead). Here the link is stopped, so the only advice is to start
+  it.</div>
+</div>
+
+<div class="figure">
+  <img src="images/v033_fig10_decodes.jpg" alt="Decodes full-panel page, empty">
+  <div class="cap">Figure 13 &mdash; The Decodes page takes over the whole pane:
+  &#9664; Back (left) returns to the last settings tab, Clear (right) resets the
+  counter; the Packet Decodes list sits above the Live Activity Log
   (sections 6.4&ndash;6.5).</div>
 </div>
 
 <div class="figure">
   <img src="images/v026_fig11_running.jpg" alt="Header while the radio link is running">
-  <div class="cap">Figure 11 &mdash; Running: the header (boxed) turns green
+  <div class="cap">Figure 14 &mdash; Running: the header (boxed) turns green
   (<code>RUNNING as {callsign}</code>) with the live Next-PLI line beneath it, and the
   button flips to Stop Radio Link.</div>
 </div>
 
 <div class="figure">
   <img src="images/v026_fig12_activity_log.jpg" alt="Live Activity Log during a session">
-  <div class="cap">Figure 12 &mdash; The Live Activity Log (&#9312;) seconds into a
+  <div class="cap">Figure 15 &mdash; The Live Activity Log (&#9312;) seconds into a
   session: modem start, RX audio source, then a position report walking the TX pipeline
   (<code>TX candidate &rarr; Queued TX &rarr; TX OFDM … ms burst</code>) &mdash; the
   exact lines cataloged in section 6.4.</div>
@@ -625,7 +660,7 @@ the build stamp and the Start/Stop button.</p>
 
 <div class="figure">
   <img src="images/v026_fig13_session_save.jpg" alt="Session log save dialog">
-  <div class="cap">Figure 13 &mdash; Stopping the link offers the session&rsquo;s
+  <div class="cap">Figure 16 &mdash; Stopping the link offers the session&rsquo;s
   detailed debug log for saving to Downloads; the log&rsquo;s header line records the
   build stamp and every active setting (section 6.4).</div>
 </div>
@@ -634,7 +669,7 @@ the build stamp and the Start/Stop button.</p>
 <p>Grouped by where each control lives in the pane:</p>
 <table>
   <tr><th>Control</th><th>Type</th><th>What it does</th></tr>
-  <tr><td>Audio Setup / Options / Decodes</td><td>Tab buttons</td><td>Switch screens; the active tab&rsquo;s button is grayed out. <b>Decodes</b> opens as a full-panel page (header and tab bar hidden) with its own &#9664; Back button returning to the last settings tab.</td></tr>
+  <tr><td>Audio Setup / Options / Levels / Decodes</td><td>Tab buttons</td><td>Switch screens; the active tab&rsquo;s button is grayed out. <b>Levels</b> shows the live audio meters and suggestions (section 6.6). <b>Decodes</b> opens as a full-panel page (header and tab bar hidden) with its own &#9664; Back button returning to the last settings tab.</td></tr>
   <tr><td>Status line</td><td>Text (header, always visible)</td><td><code>HBC Radio &mdash; RUNNING as {callsign}</code> in <b>green</b> while the modem is on; <code>HBC Radio &mdash; STOPPED</code> in <b>red</b> otherwise.</td></tr>
   <tr><td>Next PLI / Build line</td><td>Live text (1 s updates)</td><td>While running: countdown until the next position report may transmit (<code>in m:ss</code>, <code>ready (waiting for ATAK position update)</code>, or <code>disabled</code>). While stopped: <code>Build {timestamp} &middot; v{version}</code> &mdash; use it to verify which binary is actually installed.</td></tr>
   <tr><td>Ham Callsign</td><td>Text field</td><td>Your FCC callsign, max 8 characters (A&ndash;Z, 0&ndash;9, hyphen). Used as this station&rsquo;s mesh address and legal station ID. Required before starting.</td></tr>
@@ -653,6 +688,7 @@ the build stamp and the Start/Stop button.</p>
   <tr><td>Transmit / Receive</td><td>Checkboxes</td><td>Master switches. Unchecking Transmit makes the station receive-only; unchecking Receive ignores all incoming audio.</td></tr>
   <tr><td>PLI, Spots, Alerts, Chat, Shapes, CASEVAC</td><td>Checkboxes</td><td>Per-type transmit filters, matching the HBC modes of section 5.2. An unchecked type is never transmitted (receiving is unaffected).</td></tr>
   <tr><td>Start / Stop Radio Link</td><td>Button (header, always visible)</td><td>Validates and saves the settings, then starts (or stops) the selected modem and the mesh layer. The label flips to match the current state.</td></tr>
+  <tr><td>Send PLI</td><td>Button (header, under Start/Stop)</td><td>Comms check (v0.32): broadcasts the station&rsquo;s own position immediately instead of waiting out the Next-PLI countdown &mdash; tap it on every station at the start of an outing to confirm everyone hears everyone. Bypasses ONLY the PLI rate limiter; the frame rides the normal TX path (CSMA listen-before-talk / Ring MAC turn still apply) and the countdown restarts from the manual send. Toasts if ATAK has not produced a position fix yet.</td></tr>
   <tr><td>Activity Log</td><td>Scrolling text</td><td>Timestamped diagnostic feed of everything the plugin does (section 6.4). Newest entries on top.</td></tr>
   <tr><td>Clear (Decodes tab)</td><td>Button</td><td>Empties the Decodes log and resets its packet counter.</td></tr>
 </table>
@@ -689,6 +725,8 @@ runtime) and what each one means.</p>
   <tr><td class="mono">PTT: requesting USB access &mdash; approve the dialog (RTS engages automatically)</td><td>Android is showing its &ldquo;Allow ATAK to access the USB device?&rdquo; dialog; after Allow, RTS PTT engages by itself (<code>PTT: USB permission granted</code> follows). Denying logs <code>PTT: USB permission denied</code>.</td></tr>
   <tr><td class="mono">PTT: RTS write failed ({code}) &mdash; reconnect the Digirig and Stop/Start</td><td>The USB device stopped accepting the keying command (unplugged/re-enumerated); reconnect and restart the link.</td></tr>
   <tr><td class="mono">PTT: Digirig attached &mdash; engaging / PTT: Digirig detached &mdash; RTS PTT off (VOX/manual keying)</td><td>Hot-plug while the link runs: attaching a Digirig engages PTT automatically; detaching falls back to plain audio. Every USB attach/detach also re-opens the receive path (a fresh <code>RX audio source: &hellip;</code> line follows) &mdash; no Stop/Start needed after a reconnect.</td></tr>
+  <tr><td class="mono">PTT: USB re-enumerated {n} s after the last attach &mdash; the link is FLAPPING (check cable/connector/OTG power, not the plugin)</td><td>v0.33 diagnostics: an ATTACHED broadcast arrived with no physical plug event &mdash; the USB link is dropping and re-connecting electrically. Replace/clean the cable and connector; a flapping OTG link can also brown-out the phone itself.</td></tr>
+  <tr><td class="mono">PTT: USB permission dialog already pending &mdash; not re-prompting (flap suppressed)</td><td>v0.33: Android revokes USB permission on every detach, so a flapping link legitimately re-raises the permission dialog on every flap. Prompts are rate-limited to one per 10 s so dialogs cannot storm over ATAK.</td></tr>
 </table>
 <div class="note"><b>NOTE:</b> plugging in the Digirig may also pop Android&rsquo;s generic
 &ldquo;Choose an app for the USB device&rdquo; chooser. ATAK is not listed there (it registers
@@ -722,6 +760,7 @@ plugin raises when the radio link starts in USB + RTS PTT mode.</div>
   <tr><td class="mono">TX candidate: {type} uid {uid}</td><td>ATAK asked to send this event; the plugin is deciding whether to transmit it.</td></tr>
   <tr><td class="mono">Queued TX mode {n} ({x} B) {type}</td><td>The event was encoded as HBC mode <code>n</code> (<code>x</code> bytes) and handed to the mesh for transmission.</td></tr>
   <tr><td class="mono">Queued TX mode 0 ack ({type}) -&gt; {call} tag 0x{tag}</td><td>A chat delivered/read receipt is being sent back to a DM sender (section 5.4).</td></tr>
+  <tr><td class="mono">TX manual PLI (comms check) mode 1 ({x} B)</td><td>The Send PLI button was pressed; the own-position broadcast is queued on the normal TX path, bypassing only the rate limiter.</td></tr>
   <tr><td class="mono">TX skip: type {type} disabled in settings</td><td>Dropped: that message type&rsquo;s checkbox is off.</td></tr>
   <tr><td class="mono">TX skip: PLI rate limit</td><td>Dropped: a position report arrived before &ldquo;PLI min s&rdquo; elapsed (see the Next PLI countdown).</td></tr>
   <tr><td class="mono">TX skip: duplicate within 10 s</td><td>Dropped: ATAK re-sent the same event; the copy was suppressed to save airtime.</td></tr>
@@ -735,7 +774,7 @@ plugin raises when the radio link starts in USB + RTS PTT mode.</div>
   <tr><td class="mono">Mesh: direct to {call} via {call2} (seq {n})</td><td>A routed Direct left this station; an ACK is now awaited.</td></tr>
   <tr><td class="mono">Mesh: direct to {call} via {call2} (seq {n}, unacked)</td><td>A fire-and-forget Direct (chat delivered/read receipt): no retries, no failure verdict (section 4.9).</td></tr>
   <tr><td class="mono">Mesh: {call} acknowledged seq {n}</td><td>Delivery confirmed &mdash; the destination&rsquo;s ACK arrived.</td></tr>
-  <tr><td class="mono">Mesh: retry {i}/3 to {call} via {call2}</td><td>No ACK yet; the Direct was re-sent (same sequence ID). This fires only after the previous copy actually aired &mdash; under Ring, at least ~1.25 rotations later.</td></tr>
+  <tr><td class="mono">Mesh: retry {i}/3 to {call} via {call2}</td><td>No ACK yet; the Direct was re-sent (same sequence ID). This fires only after the previous copy actually aired &mdash; under Ring, 2&ndash;4 rotations later with per-attempt backoff (section 4.9).</td></tr>
   <tr><td class="mono">Mesh: direct to {call} FAILED (no ack after 3 retries)</td><td>Delivery gave up. The station is likely out of range or off. Also issued when queued copies could not reach the air for 3 minutes (stuck queue).</td></tr>
   <tr><td class="mono">Mesh: no route to {call} &mdash; sending as broadcast</td><td>No address-book entry for the destination, so the message went out unrouted; the station will still get it if in direct range.</td></tr>
   <tr><td class="mono">Mesh: forwarding {call} -&gt; {call2} via {call3}</td><td>This station is acting as a relay for someone else&rsquo;s Direct.</td></tr>
@@ -752,7 +791,7 @@ plugin raises when the radio link starts in USB + RTS PTT mode.</div>
 </table>
 
 <h3>6.5 Reading the Decodes Log</h3>
-<p>The Decodes page (Figure 10) lists only <i>successfully decoded</i> packets &mdash; a clean
+<p>The Decodes page (Figure 13) lists only <i>successfully decoded</i> packets &mdash; a clean
 record of what actually arrived. The header shows a running total
 (<code>{n} packet(s) decoded</code>; Clear resets it). Each entry has three lines:</p>
 <p class="mono">[{MM-dd HH:mm:ss}]&nbsp; {origin callsign}<br>
@@ -773,13 +812,38 @@ record of what actually arrived. The header shows a running total
 doing and why?&rdquo; (including everything it decided <i>not</i> to send); the Decodes log
 answers &ldquo;what have I actually received?&rdquo;</div>
 
+<h3>6.6 Reading the Levels Tab</h3>
+<p>The Levels tab (Figures 11&ndash;12, v0.30) turns the session log&rsquo;s audio
+diagnostics into live meters, refreshing ~3&times; per second while the link runs:</p>
+<ul>
+  <li><b>Receive</b> &mdash; Peak / RMS / learned Noise-floor bars fed passively from the
+      active modem&rsquo;s carrier sense (the same detector that drives CSMA, section 3.5),
+      plus channel busy state, busy % of the last 30 s, and clipping % of the last 10 s.
+      Target: idle RMS well under ~10% and the peak bar out of saturation; set the radio
+      volume so a received burst clearly moves the meters without pinning Peak at
+      100%.</li>
+  <li><b>Transmit</b> &mdash; the configured modem, TX output / PTT mode, VOX Lead and
+      Dwell, and the current TX queue depth.</li>
+  <li><b>Suggestions</b> &mdash; continuously evaluated advice naming the exact fix:
+      input CLIPPING (lower the radio volume into the phone/Digirig), idle input very hot
+      (close the squelch), channel sensed busy most of the last 30 s (open squelch or
+      interference, not real traffic), RX near-silent (raise volume / check the audio
+      path), no RX audio at all (device / microphone permission), and VOX keying with a
+      0 ms VOX Lead (set 250&ndash;500 ms). A green &ldquo;Levels look good&rdquo; line means
+      nothing needs changing.</li>
+</ul>
+<div class="plain"><b>Field procedure:</b> before relying on the link, open Levels on every
+station, key a test transmission from each (the <b>Send PLI</b> button is made for this),
+and fix anything the Suggestions list names &mdash; the same findings that previously
+required reading saved session logs after a failed outing.</div>
+
 <h2>7. Timing Parameters and Constants</h2>
 <table>
   <tr><th>Parameter</th><th>Value</th><th>Layer</th></tr>
   <tr><td>Route entry TTL</td><td>30 min (refreshed by any heard frame)</td><td>Mesh</td></tr>
   <tr><td>Duplicate cache TTL</td><td>5 min</td><td>Mesh</td></tr>
   <tr><td>Cleanup interval</td><td>60 s</td><td>Mesh</td></tr>
-  <tr><td>Direct retry timer</td><td>Armed when the frame airs. CSMA: 5 s + 0&ndash;2 s jitter; Ring: max(8 s, 1.25 &times; measured rotation), cap 60 s. Max 3 retries; stuck-queue fail 180 s</td><td>Mesh</td></tr>
+  <tr><td>Direct retry timer</td><td>Armed when the frame airs. CSMA: 5 s + 0&ndash;2 s jitter; Ring (v0.31): (2 + tries) &times; measured rotation, min 15 s, cap 120 s, +0&ndash;3 s jitter. Max 3 retries; stuck-queue fail 180 s</td><td>Mesh</td></tr>
   <tr><td>Quiet-time announce keepalive</td><td>10 min without own traffic</td><td>Mesh</td></tr>
   <tr><td>CSMA busy threshold / hold</td><td>4&times; adaptive noise floor / 400 ms; busy persisting past the modem&rsquo;s re-baseline window (10 s; 90 s on PSK31) folds into the noise floor so a hot RX line cannot latch the channel busy</td><td>PHY</td></tr>
   <tr><td>CSMA backoff / give-up</td><td>150&ndash;550 ms clear / 8 s (15 s Mercury, 90 s PSK31)</td><td>PHY</td></tr>
@@ -930,7 +994,7 @@ in <code>HbcPlugin.java</code> plus <code>res/layout/main_layout.xml</code>. The
 <code>codec-test/</code> programs run on an ordinary computer (no phone needed) and prove the
 byte formats match this document.</div>
 
-<div class="footer">HBC Radio ICD &nbsp;Version 1.8 &nbsp;|&nbsp; Oct 2026 &nbsp;|&nbsp; KE8TQB &nbsp;|&nbsp; github.com/ke8tqb/HBC-ATAK-Plugin</div>
+<div class="footer">HBC Radio ICD &nbsp;Version 1.9 &nbsp;|&nbsp; Nov 2026 &nbsp;|&nbsp; KE8TQB &nbsp;|&nbsp; github.com/ke8tqb/HBC-ATAK-Plugin</div>
 
 </body>
 </html>
