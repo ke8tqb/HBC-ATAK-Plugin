@@ -15,7 +15,7 @@ Get on the air in five minutes:
 1. **Install ATAK-CIV 5.8** from [tak.gov](https://tak.gov) or the Google
    Play Store, open it once, and grant it **microphone** permission.
 2. **Download the plugin APK:**
-   ➡️ [`ATAK-Plugin-HBC-ATAK-Plugin-0.29--5.8.0-civ-release.apk`](prebuilt/ATAK-Plugin-HBC-ATAK-Plugin-0.29--5.8.0-civ-release.apk)
+   ➡️ [`ATAK-Plugin-HBC-ATAK-Plugin-0.33-0e7bd0e6-5.8.0-civ-debug.apk`](prebuilt/ATAK-Plugin-HBC-ATAK-Plugin-0.33-0e7bd0e6-5.8.0-civ-debug.apk)
    (tap the link, then the **Download raw file** button).
 3. **Install it** — open the downloaded APK on your phone and approve the
    install.
@@ -39,10 +39,15 @@ on a second phone + radio and watch stations appear on each other's maps.
 
 - **Install ATAK first, then the plugin.** The plugin APK has no launcher
   icon of its own; ATAK discovers and loads it.
-- The provided APK is a **production release signed by the TAK Product
-  Center**, built for the **ATAK-CIV 5.8** line. ATAK requires an exact
-  plugin-api match, so it loads only on official 5.8.x releases from
-  tak.gov or the Play Store (not on 5.7 or SDK/developer builds).
+- The linked APK is the **latest build (v0.33)**, signed with the ATAK
+  SDK debug key: it loads on ATAK-CIV builds that accept
+  developer-signed plugins. If your ATAK is the **official tak.gov /
+  Play Store release**, it only loads **TAK Product Center-signed**
+  plugins - use the signed
+  [`ATAK-Plugin-HBC-ATAK-Plugin-0.29--5.8.0-civ-release.apk`](prebuilt/ATAK-Plugin-HBC-ATAK-Plugin-0.29--5.8.0-civ-release.apk)
+  until the signed v0.33 pipeline build lands (the submission is
+  already in the TAK third-party pipeline). ATAK requires an exact
+  plugin-api match: both APKs target the **ATAK-CIV 5.8** line.
 - Verify the plugin loaded under ATAK → **TAK Package Mgmt** (it is
   listed as *HBC-ATAK-Plugin*, with the HBC tower badge). The plugin's
   own pane shows the installed version in its header while stopped.
