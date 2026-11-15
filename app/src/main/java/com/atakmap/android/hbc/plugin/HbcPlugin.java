@@ -119,6 +119,10 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
     private UsbPtt usbPtt;
     private android.content.BroadcastReceiver usbPermReceiver;
     private Button btnStartStop;
+    private Button btnSendPli;
+    /// Most recent own-position SA event, cached BEFORE the PLI rate
+    /// limiter so the manual "Send PLI" comms check always has a position.
+    private volatile CotEvent lastSelfPliEvent;
     private TextView tvStatus, tvLog, tvPliCountdown;
     private boolean pliTickerRunning = false;
     private View tabAudio, tabOptions, tabDecodes, tabLevels;
@@ -295,6 +299,9 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
         btnTabDecodes.setOnClickListener(view -> selectTab(2));
         if (btnTabLevels != null)
             btnTabLevels.setOnClickListener(view -> selectTab(3));
+        btnSendPli = v.findViewById(R.id.hbc_send_pli);
+        if (btnSendPli != null)
+            btnSendPli.setOnClickListener(view -> sendPliNow());
         if (btnDecodesBack != null)
             btnDecodesBack.setOnClickListener(view -> selectTab(lastConfigTab));
         selectTab(0);
@@ -1615,6 +1622,10 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
                            && event.getUID() != null
                            && event.getUID().startsWith("ANDROID-"));
             }
+            // Cache the own position BEFORE rate limiting / mode filters so
+            // the manual "Send PLI" comms check always has a fresh fix.
+            if (selfPli)
+                lastSelfPliEvent = event;
 
             // v0.24 C2 Bridge diode: while bridging, never AUTO-relay
             // network-origin events to the radio. Radio-origin echoes
@@ -1729,6 +1740,41 @@ public class HbcPlugin implements IPlugin, CommsMapComponent.PreSendProcessor,
         } catch (Exception e) {
             Log.e(TAG, "processCotEvent failed", e);
             log("TX error: " + e);
+        }
+    }
+
+    /**
+     * Manual comms check: broadcast our own PLI immediately, bypassing
+     * ONLY the PLI rate limiter. The frame still rides the normal TX path
+     * (CSMA listen-before-talk / Ring MAC turn gating apply as usual) and
+     * the Next-PLI countdown restarts from now.
+     */
+    private void sendPliNow() {
+        if (!started || mesh == null) {
+            toast("Start the radio link first");
+            return;
+        }
+        if (!prefs.getBoolean("tx_enable", true)) {
+            toast("Transmit is disabled in Options");
+            return;
+        }
+        CotEvent ev = lastSelfPliEvent;
+        if (ev == null) {
+            toast("No own position yet \u2014 waiting for ATAK position update");
+            return;
+        }
+        try {
+            HbcEncoder.Encoded enc = HbcEncoder.encode(ev.toString(), false);
+            pliBroadcastNext = true;   // ring queue may replace a stale PLI
+            mesh.sendBroadcast(enc.bytes);
+            lastPliTxMs = System.currentTimeMillis();
+            log("TX manual PLI (comms check) mode " + enc.mode + " ("
+                    + enc.bytes.length + " B)");
+        } catch (HbcEncoder.HbcEncodeException e) {
+            log("Send PLI skip: " + e.getMessage());
+        } catch (Exception e) {
+            Log.e(TAG, "sendPliNow failed", e);
+            log("Send PLI error: " + e);
         }
     }
 

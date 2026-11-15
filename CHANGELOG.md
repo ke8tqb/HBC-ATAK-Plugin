@@ -4,6 +4,20 @@ All notable changes to HBC Audio Plugin are documented here.
 
 ---
 
+## [0.32] - Manual "Send PLI" comms-check button
+
+### Added
+- **Send PLI button** (header, under Start/Stop): broadcasts the
+  station's own position immediately for a pre-departure comms check,
+  instead of waiting out the Next-PLI countdown. Bypasses ONLY the
+  PLI rate limiter — the frame rides the normal TX path, so CSMA
+  listen-before-talk / Ring MAC turn gating still applies — and the
+  rate-limit countdown restarts from the manual send. Uses the most
+  recent own-position SA from ATAK (toast if none seen yet).
+  Matches the "Send PLI now" button added to the WinTAK plugin v0.6.4.
+
+---
+
 ## [0.31] - Ring MAC: slower, backing-off DM retry pacing
 
 Field finding from the 11-15 WinTAK interop session: a DM was

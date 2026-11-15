@@ -30,6 +30,7 @@
     <string name="hbc_mode_shapes">Shapes</string>
     <string name="hbc_mode_casevac">CASEVAC</string>
     <string name="hbc_start">Start Radio Link</string>
+    <string name="hbc_send_pli">Send PLI</string>
     <string name="hbc_log_label">Live Activity Log</string>
     <string name="hbc_tab_audio">Audio Setup</string>
     <string name="hbc_tab_options">Options</string>
