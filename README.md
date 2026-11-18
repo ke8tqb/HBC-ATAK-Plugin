@@ -6,6 +6,11 @@ as audio through a ham radio: no internet, no TAK server, no
 infrastructure. Compliant with FCC Part 97 station identification (your
 callsign rides in every frame).
 
+<p align="center">
+  <img src="docs/images/v033_fig02_audio_top.jpg" width="49%" alt="HBC Radio pane: Audio Setup tab with modem selection and the Start / Send PLI buttons"/>
+  <img src="docs/images/v033_fig14_levels_top.jpg" width="49%" alt="HBC Radio pane: live Levels tab with Peak / RMS / Noise-floor meters"/>
+</p>
+
 ---
 
 ## 🚀 Quick Start
@@ -14,9 +19,10 @@ Get on the air in five minutes:
 
 1. **Install ATAK-CIV 5.8** from [tak.gov](https://tak.gov) or the Google
    Play Store, open it once, and grant it **microphone** permission.
-2. **Download the plugin APK:**
-   ➡️ [`ATAK-Plugin-HBC-ATAK-Plugin-0.33-0e7bd0e6-5.8.0-civ-debug.apk`](prebuilt/ATAK-Plugin-HBC-ATAK-Plugin-0.33-0e7bd0e6-5.8.0-civ-debug.apk)
-   (tap the link, then the **Download raw file** button).
+2. **Download the newest plugin APK** from the
+   ➡️ [`prebuilt/`](prebuilt/) folder — pick the file with the highest
+   version number (tap it, then the **Download raw file** button; see
+   the signing note under *Installing the APK* below).
 3. **Install it** — open the downloaded APK on your phone and approve the
    install.
 4. **Load it in ATAK** — ATAK detects the new plugin on next launch
@@ -39,15 +45,23 @@ on a second phone + radio and watch stations appear on each other's maps.
 
 - **Install ATAK first, then the plugin.** The plugin APK has no launcher
   icon of its own; ATAK discovers and loads it.
-- The linked APK is the **latest build (v0.33)**, signed with the ATAK
-  SDK debug key: it loads on ATAK-CIV builds that accept
-  developer-signed plugins. If your ATAK is the **official tak.gov /
-  Play Store release**, it only loads **TAK Product Center-signed**
-  plugins - use the signed
-  [`ATAK-Plugin-HBC-ATAK-Plugin-0.29--5.8.0-civ-release.apk`](prebuilt/ATAK-Plugin-HBC-ATAK-Plugin-0.29--5.8.0-civ-release.apk)
-  until the signed v0.33 pipeline build lands (the submission is
-  already in the TAK third-party pipeline). ATAK requires an exact
-  plugin-api match: both APKs target the **ATAK-CIV 5.8** line.
+- [`prebuilt/`](prebuilt/) always carries the current builds; older
+  versions move to [`prebuilt/Archived/`](prebuilt/Archived/). Two
+  signing flavors exist:
+  - Files ending in **`-civ-release.apk`** are **TAK Product
+    Center-signed** production releases — the official tak.gov / Play
+    Store ATAK loads only these.
+  - Files ending in **`-civ-debug.apk`** are the newest builds, signed
+    with the ATAK SDK debug key; they load on ATAK-CIV builds that
+    accept developer-signed plugins.
+  When the newest version exists only as a `-civ-debug` build, its
+  signed release is working through the TAK third-party pipeline —
+  store-ATAK users should take the newest `-civ-release.apk`
+  meanwhile. ATAK requires an exact plugin-api match: all prebuilt
+  APKs target the **ATAK-CIV 5.8** line.
+- The installed version is always visible in the plugin pane header
+  while stopped (build stamp + version); per-version changes are in
+  [`CHANGELOG.md`](CHANGELOG.md).
 - Verify the plugin loaded under ATAK → **TAK Package Mgmt** (it is
   listed as *HBC-ATAK-Plugin*, with the HBC tower badge). The plugin's
   own pane shows the installed version in its header while stopped.
@@ -187,9 +201,9 @@ airtime. See ICD §2.1.
 
 ## Settings (in-plugin pane)
 
-Three tabs under an always-visible header (colored status line — green
+Four tabs under an always-visible header (colored status line — green
 RUNNING / red STOPPED — plus a build stamp while stopped, and the
-Start/Stop button):
+stacked Start/Stop and **Send PLI** comms-check buttons):
 
 - **Audio Setup** — modem selection (OFDM default; OFDM / Mercury /
   AX.25-APRS / PSK31, must match on all stations), TX audio stream
@@ -203,6 +217,10 @@ Start/Stop button):
   from the mesh), PLI rate limit, TX/RX enables, per-message-type
   transmit toggles, and the C2 Bridge one-way gateway with its Push to
   RF dialog
+- **Levels** — live Peak / RMS / noise-floor meters fed from the
+  carrier sense, channel busy and clipping percentages, TX status, and
+  a suggestions engine that names the exact audio-level fix (clipping,
+  open squelch, silent RX path, missing VOX leader)
 - **Decodes** — a full-panel page showing every received packet with
   timestamp, source, mode summary and payload size, above the live
   activity log
